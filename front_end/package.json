@@ -1,0 +1,53 @@
+{
+  "name": "new-language-model",
+  "version": "0.0.1",
+  "description": "New Language Model",
+  "main": "dist/main/main.js",
+  "author": "Eon Dev",
+  "license": "MIT",
+  "scripts": {
+    "dev:renderer": "vite",
+    "dev:main": "webpack --mode development --watch",
+    "build:renderer": "vite build",
+    "build:main": "webpack --mode production",
+    "build": "npm run build:main && npm run build:renderer",
+    "start": "electron dist/main/main.js",
+    "dev": "concurrently \"npm run dev:main\" \"npm run dev:renderer\" \"wait-on dist/main/main.js && electron dist/main/main.js\"",
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier --write .",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:renderer": "vitest --config vitest.renderer.config.ts",
+    "test:renderer:run": "vitest run --config vitest.renderer.config.ts"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@fontsource/orbitron": "^5.2.6",
+    "@mui/icons-material": "^5.18.0",
+    "@mui/material": "^5.18.0",
+    "electron": "^39.2.4",
+    "framer-motion": "^10.18.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.1",
+    "@testing-library/user-event": "^14.6.1",
+    "@vitejs/plugin-react": "^4.0.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "concurrently": "^8.0.0",
+    "eslint": "^8.57.0",
+    "jsdom": "^27.4.0",
+    "prettier": "^3.2.5",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.4.0",
+    "vite": "^7.0.4",
+    "vitest": "^3.2.4",
+    "wait-on": "^7.0.0",
+    "webpack": "^5.91.0",
+    "webpack-cli": "^5.1.4"
+  }
+}
