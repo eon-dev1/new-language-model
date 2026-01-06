@@ -32,3 +32,11 @@ Known Issues
 - References to PostgreSQL have not been completely removed
 - UI is not fully wired up to human-initiated edits
 
+- Preview:
+<img width="1338" height="736" alt="image" src="https://github.com/user-attachments/assets/e2f8c0cd-db8b-4255-8867-68e23a351446" />
+
+<img width="1413" height="736" alt="image" src="https://github.com/user-attachments/assets/6f0cbe2c-4293-4e61-a55b-2ea07eae5451" />
+
+<img width="1221" height="855" alt="image" src="https://github.com/user-attachments/assets/16b44b83-9b0e-4edf-b54d-7fe101d7d963" />
+
+
