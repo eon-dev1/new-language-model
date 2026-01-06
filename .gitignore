@@ -1,0 +1,60 @@
+# ======================
+# IDE & Editor
+# ======================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ======================
+# Environment & Secrets
+# ======================
+*.env
+.env.*
+
+# ======================
+# Python
+# ======================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+nlm_standalone/back_end/nlm_backend_venv/
+*_venv*/
+*venv*/
+.venv/
+venv/
+ENV/
+env/
+poetry.lock
+
+# ======================
+# Node.js / Frontend
+# ======================
+node_modules/
+nlm_standalone/front_end/dist/
+
+# ======================
+# Claude Code
+# ======================
+.claude/
+
+# ======================
+# Data (large files)
+# ======================
+data/bibles/
+
+
+# ===========================
+# OS Generated
+# ===========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+*.lnk
