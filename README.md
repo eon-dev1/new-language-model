@@ -1,8 +1,8 @@
-The New Language Model uses context engineering to facilitate bible translation. 
+The New Language Model uses context engineering to facilitate Bible translation. 
 
-The translation cycle will start with any amount of parallell Bible translation, and can also start with an imported dictionary or grammar outline called Source Materials. (Future imports from Webonary.org are planned)
+The translation cycle will start with any amount of parallel Bible translation, and can also start with an imported dictionary or grammar outline, called Source Materials. (Future imports from Webonary.org are planned)
 
-These Source Materials will each come in to tiers: human-verified, and AI-drafted. The bible, dictionary, and grammar are imported into a MongoDB (local currently, Atlas sync potential future enhancement) and comes equiped with MCP tools that an AI agent can call to begin assisting translation. 
+These Source Materials will each come in to tiers: human-verified, and AI-drafted. The bible, dictionary, and grammar are imported into MongoDB and comes equiped with MCP tools that an AI agent can call to begin assisting translation. 
 
 Example prompt, "Compare parallell translations of Matthew - Luke, and generate a dictionary for words that don't yet have entries". The AI will produce dictionary drafts which the human translator can verify in the GUI. Verified entries have higher confidence scores when feeding them as context for future queries. 
 
