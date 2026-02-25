@@ -15,7 +15,6 @@ Philosophy: In many cases, context engineering will be as good or greater than N
 Future Plans
 - Integration with Paratext 10
 - One click import of webonary.org dictionaries
-- Encapsulate everything in Docker container, including spawning Claude CLI instances inside of the container.
 - Local LLM integration 
 - Export to USFM and paratext-compatible formats
 - Easy export of mongodb backup 
@@ -26,7 +25,6 @@ Future Plans
 
 Known Issues
 - So far tested only on Ubuntu 24.04 with Claude Code as MCP host
-- Claude Desktop may replace Claude CLI spawns as the MCP Host
 - References to Atlas are not yet functional
 - Authentication between back-end and front-end has been simplified but references to old logic not completely removed
 - References to PostgreSQL have not been completely removed
