@@ -42,7 +42,7 @@ nlm_standalone/front_end/dist/
 # ======================
 # Data (large files)
 # ======================
-data/bibles/
+data/bibles
 
 
 # ===========================
