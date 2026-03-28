@@ -12,7 +12,7 @@
 1. **Clone the repository**:
    ```bash
    git clone <repository-url>
-   cd nlm_public/back_end
+   cd nlm/back_end
    ```
 
 2. **Create virtual environment**:
@@ -37,7 +37,6 @@
    mkdir -p ~/secure
    cat > ~/secure/nlm_credentials.env << EOF
    MONGODB_CONNECTION_STRING="mongodb+srv://user:pass@cluster.mongodb.net/"
-   FAST_API_KEY="dev-api-key-12345"
    EOF
    chmod 600 ~/secure/nlm_credentials.env
 
@@ -77,8 +76,7 @@ Once running, the server is available at `http://localhost:8221`.
 
 **Test with curl**:
 ```bash
-curl -X GET "http://localhost:8221/api/check-connection" \
-  -H "Authorization: Bearer your-api-key"
+curl -X GET "http://localhost:8221/api/check-connection"
 ```
 
 ---
@@ -91,14 +89,24 @@ The project uses pytest with the following test organization:
 
 ```
 back_end/
-|-- tests/                               # Main test directory
-|   |-- conftest.py                      # Shared fixtures
-|   |-- test_usfm_*.py                   # USFM parser tests
+|-- tests/
+|   |-- conftest.py
+|   |-- test_usfm_parser.py
+|   |-- test_usfm_book_codes.py
+|   |-- test_usfm_importer.py
+|   |-- test_remove_usfm_markers.py
+|   |-- test_html_parser.py
 |   |-- unit/
-|       |-- db_connector/                # Database connector tests
+|       |-- db_connector/
 |           |-- conftest.py
 |           |-- test_imports_and_structure.py
 |           |-- test_mongodb_connection.py
+|       |-- routes/
+|       |-- chat/
+|       |-- mcp_server/
+|       |-- schema_enforcer/
+|       |-- word_index/
+|   |-- integration/
 ```
 
 ### Running Tests
@@ -160,9 +168,8 @@ pytest tests/unit/db_connector/test_mongodb_connection.py -v
 |-----------|---------|
 | `routes/` | FastAPI route handlers |
 | `db_connector/` | Database connection and settings |
-| `config/` | Configuration classes |
 | `utils/` | Utility modules and helpers |
-| `inference/` | LLM service interfaces |
+| `mcp_server/` | MCP server for Claude tool access |
 | `tests/` | Test files (prefixed with `test_`) |
 
 ### Naming Conventions
@@ -283,11 +290,7 @@ async def find_language(code: str) -> Optional[Dict[str, Any]]:
    ```python
    from routes.my_feature import router as my_feature_router
 
-   app.include_router(
-       my_feature_router,
-       prefix="/api",
-       dependencies=[Depends(verify_api_key)]
-   )
+   app.include_router(my_feature_router, prefix="/api")
    ```
 
 3. **Add tests**:
@@ -300,10 +303,7 @@ async def find_language(code: str) -> Optional[Dict[str, Any]]:
    client = TestClient(app)
 
    def test_my_endpoint():
-       response = client.get(
-           "/api/my-endpoint",
-           headers={"Authorization": "Bearer test-key"}
-       )
+       response = client.get("/api/my-endpoint")
        assert response.status_code == 200
    ```
 
@@ -425,7 +425,8 @@ async def example_context_manager():
         docs = await db.languages.find().to_list(100)
         return docs
 
-# Method 3: Global connector (recommended for routes)
+# Method 3: Global singleton connector (used by MCP server, not REST routes)
+# REST routes use Depends(get_db) from routes/dependencies.py instead.
 from db_connector.connection import get_mongodb_connector
 
 async def example_global():
@@ -616,7 +617,7 @@ python -c "import sys; print('\n'.join(sys.path))"
 python -c "from db_connector.connection import MongoDBConnector; print('OK')"
 
 # Check environment variables
-python -c "import os; print(os.environ.get('FAST_API_KEY', 'NOT SET'))"
+python -c "import os; print(os.environ.get('FAST_API_PORT', '8221 (default)'))"
 
 # Test MongoDB connection
 python -c "

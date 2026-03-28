@@ -142,37 +142,6 @@ class TestValidateLanguage:
         assert result["language_code"] == "english"
 
 
-class TestValidateTranslationType:
-    """Tests for validate_translation_type helper"""
-
-    def test_validate_translation_type_accepts_human(self):
-        """'human' is valid translation type"""
-        from mcp_server.tools.base import validate_translation_type
-
-        # Should not raise
-        validate_translation_type("human")
-
-    def test_validate_translation_type_accepts_ai(self):
-        """'ai' is valid translation type"""
-        from mcp_server.tools.base import validate_translation_type
-
-        validate_translation_type("ai")
-
-    def test_validate_translation_type_accepts_none(self):
-        """None is valid (means 'both types')"""
-        from mcp_server.tools.base import validate_translation_type
-
-        validate_translation_type(None)
-
-    def test_validate_translation_type_rejects_invalid(self):
-        """Invalid translation type raises ToolError"""
-        from mcp_server.tools.base import ToolError, validate_translation_type
-
-        with pytest.raises(ToolError) as exc_info:
-            validate_translation_type("invalid")
-
-        assert exc_info.value.code == "invalid_input"
-
 
 class TestValidateBookCode:
     """Tests for validate_book_code helper"""

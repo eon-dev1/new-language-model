@@ -10,7 +10,6 @@ from typing import Any, Callable
 
 from utils.schema_enforcer.schema_definition import (
     BOOK_CODE_PATTERN,
-    VALID_TRANSLATION_TYPES,
     BOOK_ORDER_RANGE,
 )
 
@@ -93,10 +92,6 @@ def pattern_validator(pattern: str, field_name: str) -> ValidatorFunc:
 # =============================================================================
 # INSTANTIATED VALIDATORS (from factories)
 # =============================================================================
-
-validate_translation_type: ValidatorFunc = enum_validator(
-    VALID_TRANSLATION_TYPES, "translation_type"
-)
 
 validate_book_order: ValidatorFunc = range_validator(
     BOOK_ORDER_RANGE[0], BOOK_ORDER_RANGE[1], "book_order"
@@ -185,15 +180,9 @@ def validate_document(doc: dict, schema: dict, collection_name: str) -> list[str
     if collection_name == "bible_texts":
         if "book_code" in doc:
             issues.extend(validate_book_code(doc["book_code"]))
-        if "translation_type" in doc:
-            issues.extend(validate_translation_type(doc["translation_type"]))
 
     elif collection_name == "base_structure_bible":
         if "book_order" in doc:
             issues.extend(validate_book_order(doc["book_order"]))
-
-    elif collection_name in ("dictionaries", "grammar_systems"):
-        if "translation_type" in doc:
-            issues.extend(validate_translation_type(doc["translation_type"]))
 
     return issues

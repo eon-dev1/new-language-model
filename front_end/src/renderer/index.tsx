@@ -5,6 +5,7 @@ import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { App } from './app';
 import { SettingsProvider, useSettings } from './contexts/SettingsContext';
+import { ChatProvider } from './contexts/ChatContext';
 import { createDynamicTheme } from './theme/createDynamicTheme';
 
 /**
@@ -35,12 +36,15 @@ const root = createRoot(container);
  *   └─ ThemedApp (creates dynamic theme from settings)
  *        └─ ThemeProvider (MUI theme)
  *             └─ CssBaseline (applies font to <body>)
- *             └─ App (main application)
+ *             └─ ChatProvider (chat state)
+ *                  └─ App (main application)
  */
 root.render(
   <SettingsProvider>
     <ThemedApp>
-      <App />
+      <ChatProvider>
+        <App />
+      </ChatProvider>
     </ThemedApp>
   </SettingsProvider>
 );

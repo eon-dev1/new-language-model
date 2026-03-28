@@ -21,17 +21,17 @@ class TestUSFMBookCodeMappings:
     """Test the USFM book code mapping dictionaries."""
 
     def test_usfm_book_data_has_66_books(self):
-        """The Bible has 66 books."""
-        assert len(USFM_BOOK_DATA) == 66
+        """The Bible has 66 canonical books plus 1 Enoch."""
+        assert len(USFM_BOOK_DATA) == 67
 
     def test_usfm_to_book_code_has_66_entries(self):
-        assert len(USFM_TO_BOOK_CODE) == 66
+        assert len(USFM_TO_BOOK_CODE) == 67
 
     def test_usfm_to_book_name_has_66_entries(self):
-        assert len(USFM_TO_BOOK_NAME) == 66
+        assert len(USFM_TO_BOOK_NAME) == 67
 
     def test_book_code_to_usfm_has_66_entries(self):
-        assert len(BOOK_CODE_TO_USFM) == 66
+        assert len(BOOK_CODE_TO_USFM) == 67
 
     def test_all_book_codes_are_lowercase(self):
         """MongoDB book codes should be lowercase."""
@@ -182,18 +182,18 @@ class TestGetAllCodes:
     """Test get_all_* functions."""
 
     def test_get_all_usfm_codes(self):
-        """Should return all 66 USFM codes."""
+        """Should return all 67 USFM codes."""
         codes = get_all_usfm_codes()
-        assert len(codes) == 66
+        assert len(codes) == 67
         assert "GEN" in codes
         assert "REV" in codes
         assert codes[0] == "GEN"  # First book
-        assert codes[-1] == "REV"  # Last book
+        assert codes[-1] == "ENO"  # Last book (1 Enoch appended)
 
     def test_get_all_book_codes(self):
-        """Should return all 66 book codes."""
+        """Should return all 67 book codes."""
         codes = get_all_book_codes()
-        assert len(codes) == 66
+        assert len(codes) == 67
         assert "genesis" in codes
         assert "revelation" in codes
 

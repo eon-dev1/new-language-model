@@ -1,11 +1,10 @@
 // devtools-manager.ts
 // Manages DevTools state and toggling
 
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 
-// Simple boolean to control automatic DevTools opening on startup
-// Set to true to auto-open DevTools, false to keep closed
-const AUTO_OPEN_DEVTOOLS_ON_STARTUP = true;
+// Auto-open DevTools only in development (false when packaged)
+const AUTO_OPEN_DEVTOOLS_ON_STARTUP = !app.isPackaged;
 
 // Track DevTools state
 let isDevToolsOpen = false;

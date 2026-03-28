@@ -1,5 +1,5 @@
 # db_connector/core/connection.py
-# MongoDB Atlas connection manager using Motor
+# MongoDB connection manager using Motor
 
 import asyncio
 from typing import Optional, Dict, Any
@@ -19,19 +19,19 @@ class MongoDBConnector:
         self._database: Optional[AsyncIOMotorDatabase] = None
         self._is_connected = False
 
-        logger.info(f"Initialized MongoDB connector: {self.settings}")
+        logger.debug(f"Initialized MongoDB connector: {self.settings}")
 
     async def connect(self) -> None:
         """Establish connection to MongoDB Atlas"""
         if self._is_connected and self._client:
-            logger.info("MongoDB connection already established")
+            logger.debug("MongoDB connection already established")
             return
         
         try:
             # Create Motor client with connection options
             connection_options = self.settings.get_connection_options()
             
-            logger.info(f"Connecting to MongoDB Atlas database: {self.settings.database_name}")
+            logger.debug(f"Connecting to MongoDB Atlas database: {self.settings.database_name}")
             
             self._client = AsyncIOMotorClient(
                 self.settings.mongodb_connection_string,
@@ -45,7 +45,7 @@ class MongoDBConnector:
             await self._client.admin.command('ping')
             self._is_connected = True
             
-            logger.info(f"✅ MongoDB connection established successfully to database: {self.settings.database_name}")
+            logger.debug(f"✅ MongoDB connection established successfully to database: {self.settings.database_name}")
 
         except (ConnectionFailure, ServerSelectionTimeoutError) as e:
             logger.error(f"Failed to connect to MongoDB: {e}")
@@ -62,7 +62,7 @@ class MongoDBConnector:
             try:
                 self._client.close()
                 self._is_connected = False
-                logger.info("🔌 MongoDB connection closed")
+                logger.debug("🔌 MongoDB connection closed")
             except Exception as e:
                 logger.error(f"Error closing MongoDB connection: {e}")
         

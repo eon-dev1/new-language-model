@@ -1,7 +1,7 @@
 // components/LanguageProject.tsx
 // Main language project view with resource navigation
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -22,7 +22,9 @@ import { motion } from 'framer-motion';
 import { LanguageProject as LanguageProjectType, ResourceType } from '../renderer/types/LanguageProject';
 import { BibleReader } from './BibleReader';
 import { DictionaryViewer } from './DictionaryViewer';
-import { GrammarViewer } from './GrammarViewer';
+import { MemoriesViewer } from './MemoriesViewer';
+import { useChat } from '../renderer/contexts/ChatContext';
+import { TOPBAR_HEIGHT } from '../renderer/constants';
 
 interface LanguageProjectProps {
   project: LanguageProjectType;
@@ -31,6 +33,15 @@ interface LanguageProjectProps {
 
 export function LanguageProject({ project, onBack }: LanguageProjectProps) {
   const [selectedResource, setSelectedResource] = useState<ResourceType | null>(null);
+  const { setAppContext } = useChat();
+
+  // Set language context when component mounts or project changes
+  useEffect(() => {
+    setAppContext({
+      languageCode: project.language.code || project.language.id,
+      view: 'language_project',
+    });
+  }, [project.language.code, project.language.id, setAppContext]);
 
   const handleResourceSelect = (resourceType: ResourceType) => {
     console.log(`[LanguageProject] Selected resource: ${resourceType} for ${project.language.name}`);
@@ -54,24 +65,18 @@ export function LanguageProject({ project, onBack }: LanguageProjectProps) {
     {
       type: 'dictionary' as ResourceType,
       title: 'Dictionary',
-      subtitle: 'Unified human & AI dictionary',
+      subtitle: 'Dictionary with word definitions',
       icon: <Book sx={{ fontSize: 40 }} />,
-      available: project.resources.dictionary?.available ||
-                 project.resources.humanDictionary?.available ||
-                 project.resources.nlmDictionary?.available ||
-                 true, // Default to available for new unified view
+      available: project.resources.dictionary?.available ?? true,
       color: '#2196F3'
     },
     {
-      type: 'grammar' as ResourceType,
-      title: 'Grammar',
-      subtitle: 'Unified human & AI grammar system',
+      type: 'memories' as ResourceType,
+      title: 'Memories',
+      subtitle: 'Grammar, notes, and correction history',
       icon: <School sx={{ fontSize: 40 }} />,
-      available: project.resources.grammar?.available ||
-                 project.resources.humanGrammar?.available ||
-                 project.resources.nlmGrammar?.available ||
-                 true, // Default to available for new unified view
-      color: '#9C27B0'
+      available: project.resources.grammar?.available ?? true,
+      color: '#FFFFFF'
     }
   ];
 
@@ -96,9 +101,9 @@ export function LanguageProject({ project, onBack }: LanguageProjectProps) {
     );
   }
 
-  if (selectedResource === 'grammar') {
+  if (selectedResource === 'memories') {
     return (
-      <GrammarViewer
+      <MemoriesViewer
         languageCode={project.language.code || project.language.id}
         languageName={project.language.name}
         onBack={handleBackToResources}
@@ -112,7 +117,7 @@ export function LanguageProject({ project, onBack }: LanguageProjectProps) {
       sx={{
         minHeight: '100vh',
         background: 'linear-gradient(135deg, #1A1A1A, #2D2D2D)',
-        pt: 7,  // 56px to clear fixed TopBar (48px)
+        pt: `${TOPBAR_HEIGHT + 8}px`,
         pb: 4,
       }}
     >
@@ -139,23 +144,33 @@ export function LanguageProject({ project, onBack }: LanguageProjectProps) {
             Project Progress
           </Typography>
           <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
+            <Grid item xs={12} md={4}>
               <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)' }}>
-                Bible Verification: {project.progress.humanBibleCompletion}%
+                Old Testament: {project.progress.oldTestamentCompletion.toFixed(1)}%
               </Typography>
               <LinearProgress
                 variant="determinate"
-                value={project.progress.humanBibleCompletion}
+                value={project.progress.oldTestamentCompletion}
                 sx={{ mt: 1 }}
               />
             </Grid>
-            <Grid item xs={12} md={6}>
+            <Grid item xs={12} md={4}>
               <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)' }}>
-                Dictionary & Grammar: {Math.round((project.progress.dictionaryCompletion + project.progress.grammarCompletion) / 2)}%
+                New Testament: {project.progress.newTestamentCompletion.toFixed(1)}%
               </Typography>
               <LinearProgress
                 variant="determinate"
-                value={Math.round((project.progress.dictionaryCompletion + project.progress.grammarCompletion) / 2)}
+                value={project.progress.newTestamentCompletion}
+                sx={{ mt: 1 }}
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)' }}>
+                Overall: {project.progress.overallCompletion.toFixed(1)}%
+              </Typography>
+              <LinearProgress
+                variant="determinate"
+                value={project.progress.overallCompletion}
                 sx={{ mt: 1 }}
               />
             </Grid>
@@ -235,12 +250,7 @@ export function LanguageProject({ project, onBack }: LanguageProjectProps) {
           ))}
         </Grid>
 
-        {/* Last Accessed Info */}
-        <Paper elevation={1} sx={{ p: 2, mt: 4, bgcolor: 'rgba(255,255,255,0.02)' }}>
-          <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)' }}>
-            Last accessed: {project.lastAccessed.toLocaleDateString()}
-          </Typography>
-        </Paper>
+
       </Container>
     </Box>
   );

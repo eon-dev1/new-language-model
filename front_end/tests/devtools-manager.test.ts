@@ -6,6 +6,7 @@ import type { BrowserWindow } from 'electron';
 
 // Only mock electron - NOT the module under test
 vi.mock('electron', () => ({
+  app: { isPackaged: false },
   BrowserWindow: vi.fn()
 }));
 

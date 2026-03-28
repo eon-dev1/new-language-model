@@ -19,27 +19,23 @@ from mcp_server.tools.base import (
     error_response,
     success_response,
     validate_language,
-    validate_translation_type,
     validate_book_code,
     save_result_to_file,
     VALID_FILENAME_PATTERN,
 )
 
 
-async def list_bible_books(
-    db, language_code: str, translation_type: str | None = None
-) -> dict[str, Any]:
+async def list_bible_books(db, language_code: str) -> dict[str, Any]:
     """
     Get all books for a language from bible_books collection.
 
     Args:
         db: MongoDBConnector instance
         language_code: Language to get books for
-        translation_type: Optional filter ("human" or "ai")
 
     Returns:
         {
-            "books": [{code, name, chapter_count, testament, book_order, translation_type}],
+            "books": [{code, name, chapter_count, testament, book_order}],
             "count": int
         }
     """
@@ -49,18 +45,8 @@ async def list_bible_books(
     except ToolError as e:
         return error_response(e)
 
-    # Validate translation type if provided
-    try:
-        validate_translation_type(translation_type)
-    except ToolError as e:
-        return error_response(e)
-
-    # Build query
-    query = {"language_code": language_code.lower()}
-    if translation_type:
-        query["translation_type"] = translation_type
-
     # Query bible_books collection
+    query = {"language_code": language_code.lower()}
     bible_books = db.get_collection("bible_books")
     cursor = bible_books.find(query)
     cursor = cursor.sort("metadata.canonical_order", 1)  # Sort by canonical order
@@ -76,7 +62,6 @@ async def list_bible_books(
                 "chapter_count": doc["total_chapters"],
                 "testament": metadata.get("testament"),
                 "book_order": metadata.get("canonical_order"),
-                "translation_type": doc["translation_type"],
             }
         )
 
@@ -88,7 +73,6 @@ async def get_chapter(
     language_code: str,
     book_code: str,
     chapter: int,
-    translation_type: str | None = None,
 ) -> dict[str, Any]:
     """
     Get all verses for a chapter.
@@ -98,7 +82,6 @@ async def get_chapter(
         language_code: Language to get verses for
         book_code: Book code (e.g., "genesis", "1_chronicles")
         chapter: Chapter number
-        translation_type: Optional filter ("human" or "ai")
 
     Returns:
         {
@@ -123,12 +106,6 @@ async def get_chapter(
     except ToolError as e:
         return error_response(e)
 
-    # Validate translation type
-    try:
-        validate_translation_type(translation_type)
-    except ToolError as e:
-        return error_response(e)
-
     # Check if language is English (special case)
     is_english = lang_doc.get("is_base_language", False)
 
@@ -138,8 +115,6 @@ async def get_chapter(
         "book_code": book_code,
         "chapter": chapter,
     }
-    if translation_type:
-        query["translation_type"] = translation_type
 
     # Query bible_texts collection
     bible_texts = db.get_collection("bible_texts")
@@ -198,7 +173,6 @@ async def get_bible_chunk(
     book_code: str | None = None,
     offset: int = 0,
     limit: int = 100,
-    translation_type: str | None = None,
     save_to_file: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -210,7 +184,6 @@ async def get_bible_chunk(
         book_code: Optional book filter
         offset: Number of verses to skip (default 0)
         limit: Maximum verses to return (default 100, max 500)
-        translation_type: Optional filter ("human" or "ai")
         save_to_file: Optional filename to save results to temp_files/ directory.
                       If provided, returns {saved_to, record_count} instead of full data.
 
@@ -242,12 +215,6 @@ async def get_bible_chunk(
         except ToolError as e:
             return error_response(e)
 
-    # Validate translation type
-    try:
-        validate_translation_type(translation_type)
-    except ToolError as e:
-        return error_response(e)
-
     # Enforce limit max
     limit = min(limit, 500)
 
@@ -258,8 +225,6 @@ async def get_bible_chunk(
     query = {"language_code": language_code.lower()}
     if book_code:
         query["book_code"] = book_code
-    if translation_type:
-        query["translation_type"] = translation_type
 
     # Query bible_texts collection
     bible_texts = db.get_collection("bible_texts")
@@ -320,7 +285,6 @@ async def save_bible_batches(
     batch_start: int = 1,
     batch_end: int | None = None,
     book_code: str | None = None,
-    translation_type: str | None = None,
     filename_prefix: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -335,7 +299,6 @@ async def save_bible_batches(
         batch_start: First batch number, 1-indexed (default 1)
         batch_end: Last batch number inclusive (None = all remaining)
         book_code: Optional book filter
-        translation_type: Optional 'human' or 'ai' filter
         filename_prefix: Prefix for files (default: '{lang}_batch')
 
     Returns:
@@ -409,12 +372,6 @@ async def save_bible_batches(
         except ToolError as e:
             return error_response(e)
 
-    # Validate translation type
-    try:
-        validate_translation_type(translation_type)
-    except ToolError as e:
-        return error_response(e)
-
     # === Phase 3: Count and Calculate ===
 
     is_english = lang_doc.get("is_base_language", False)
@@ -423,8 +380,6 @@ async def save_bible_batches(
     query = {"language_code": language_code.lower()}
     if book_code:
         query["book_code"] = book_code
-    if translation_type:
-        query["translation_type"] = translation_type
 
     # Count total verses
     bible_texts = db.get_collection("bible_texts")
@@ -548,7 +503,7 @@ async def get_parallel_verses(
 
     Returns:
         {
-            "parallel_verses": [{book_code, chapter, verse, translations: {lang: {text, translation_type, human_verified?}}}],
+            "parallel_verses": [{book_code, chapter, verse, translations: {lang: {text, human_verified?}}}],
             "languages": [str],
             "book_code": str,
             "chapter": int,
@@ -558,9 +513,7 @@ async def get_parallel_verses(
         }
 
     Notes:
-        - When both human and AI translations exist, human is preferred
         - human_verified field only appears for non-English languages
-        - Response includes translation_type so caller knows what they got
     """
     # === Phase 1: Input Validation ===
 
@@ -668,7 +621,6 @@ async def get_parallel_verses(
 
     bible_texts = db.get_collection("bible_texts")
 
-    # Build query (fetch ALL translation types for human > ai priority)
     query = {
         "book_code": book_code,
         "chapter": chapter,
@@ -680,12 +632,11 @@ async def get_parallel_verses(
     if verse_end is not None:
         query.setdefault("verse", {})["$lte"] = verse_end
 
-    # Sort by verse ASC, translation_type DESC ("human" > "ai" alphabetically)
     cursor = bible_texts.find(query)
-    cursor = cursor.sort([("verse", 1), ("translation_type", -1)])
+    cursor = cursor.sort([("verse", 1)])
     docs = await cursor.to_list(length=None)
 
-    # === Phase 4: Group by verse, first-match-wins (human > ai) ===
+    # === Phase 4: Group by verse, first-match-wins ===
 
     verses_by_number = defaultdict(dict)
     all_verse_nums = set()
@@ -696,17 +647,13 @@ async def get_parallel_verses(
         all_verse_nums.add(verse_num)
 
         # Skip if we already have a translation for this language+verse
-        # (first one wins due to sort order = human preferred)
         if lang_code in verses_by_number[verse_num]:
             continue
 
         config = lang_configs[lang_code]
         text = doc.get(config["text_field"], "")
 
-        translation_data = {
-            "text": text,
-            "translation_type": doc.get("translation_type", "human"),
-        }
+        translation_data = {"text": text}
 
         # Add human_verified only for non-English
         if not config["is_base"]:

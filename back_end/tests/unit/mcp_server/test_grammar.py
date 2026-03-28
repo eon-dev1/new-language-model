@@ -55,13 +55,11 @@ class TestListGrammarCategories:
         assert syntax["has_content"] is False
 
     @pytest.mark.asyncio
-    async def test_list_grammar_categories_with_translation_type(self, mock_mcp_db):
-        """Filters by translation type when specified"""
+    async def test_list_grammar_categories_returns_categories_for_language(self, mock_mcp_db):
+        """Returns categories for the language"""
         from mcp_server.tools.grammar import list_grammar_categories
 
-        result = await list_grammar_categories(
-            mock_mcp_db, "heb", translation_type="human"
-        )
+        result = await list_grammar_categories(mock_mcp_db, "heb")
 
         assert "categories" in result
 
@@ -144,13 +142,11 @@ class TestGetGrammarCategory:
         assert result["error"]["code"] == "not_found"
 
     @pytest.mark.asyncio
-    async def test_get_grammar_category_with_translation_type(self, mock_mcp_db):
-        """Filters by translation type when specified"""
+    async def test_get_grammar_category_returns_description(self, mock_mcp_db):
+        """Returns description field for category"""
         from mcp_server.tools.grammar import get_grammar_category
 
-        result = await get_grammar_category(
-            mock_mcp_db, "heb", "phonology", translation_type="human"
-        )
+        result = await get_grammar_category(mock_mcp_db, "heb", "phonology")
 
         assert "description" in result
 
@@ -178,7 +174,7 @@ class TestUpdateGrammarCategory:
         }
 
         result = await update_grammar_category(
-            mock_mcp_db, "heb", "phonology", "human", content
+            mock_mcp_db, "heb", "phonology", content
         )
 
         assert result["success"] is True
@@ -193,7 +189,7 @@ class TestUpdateGrammarCategory:
         content = {"notes": ["Just adding a note"]}
 
         result = await update_grammar_category(
-            mock_mcp_db, "heb", "morphology", "human", content
+            mock_mcp_db, "heb", "morphology", content
         )
 
         assert result["success"] is True
@@ -204,7 +200,7 @@ class TestUpdateGrammarCategory:
         from mcp_server.tools.grammar import update_grammar_category
 
         result = await update_grammar_category(
-            mock_mcp_db, "heb", "invalid_category", "human", {"notes": []}
+            mock_mcp_db, "heb", "invalid_category", {"notes": []}
         )
 
         assert "error" in result
@@ -216,23 +212,11 @@ class TestUpdateGrammarCategory:
         from mcp_server.tools.grammar import update_grammar_category
 
         result = await update_grammar_category(
-            mock_mcp_db, "nonexistent", "phonology", "human", {"notes": []}
+            mock_mcp_db, "nonexistent", "phonology", {"notes": []}
         )
 
         assert "error" in result
         assert result["error"]["code"] == "not_found"
-
-    @pytest.mark.asyncio
-    async def test_update_grammar_category_requires_translation_type(self, mock_mcp_db):
-        """Requires translation_type for writes"""
-        from mcp_server.tools.grammar import update_grammar_category
-
-        result = await update_grammar_category(
-            mock_mcp_db, "heb", "phonology", None, {"notes": []}  # type: ignore
-        )
-
-        assert "error" in result
-        assert result["error"]["code"] == "invalid_input"
 
     @pytest.mark.asyncio
     async def test_update_grammar_category_creates_if_missing(self, mock_mcp_db):
@@ -244,7 +228,6 @@ class TestUpdateGrammarCategory:
             mock_mcp_db,
             "english",
             "phonology",
-            "human",
             {"description": "English phonology", "notes": ["44 phonemes"]},
         )
 
@@ -259,9 +242,33 @@ class TestUpdateGrammarCategory:
         content = {"invalid_field": "should not be allowed"}
 
         result = await update_grammar_category(
-            mock_mcp_db, "heb", "phonology", "human", content
+            mock_mcp_db, "heb", "phonology", content
         )
 
         # Should either ignore invalid fields or return validation error
         # Implementation can choose - just shouldn't crash
         assert "success" in result or "error" in result
+
+    @pytest.mark.asyncio
+    async def test_update_rejects_wrong_type_description(self, mock_mcp_db):
+        """description must be a string, not a number."""
+        from mcp_server.tools.grammar import update_grammar_category
+        content = {"description": 99999}
+        result = await update_grammar_category(mock_mcp_db, "heb", "phonology", content)
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_update_rejects_extra_fields(self, mock_mcp_db):
+        """Unknown fields are rejected (extra='forbid')."""
+        from mcp_server.tools.grammar import update_grammar_category
+        content = {"description": "ok", "malicious_field": "injected"}
+        result = await update_grammar_category(mock_mcp_db, "heb", "phonology", content)
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_update_still_accepts_valid_content(self, mock_mcp_db):
+        """Regression: normal grammar updates still accepted after validation."""
+        from mcp_server.tools.grammar import update_grammar_category
+        content = {"description": "Updated phonology", "notes": ["vowel harmony observed"]}
+        result = await update_grammar_category(mock_mcp_db, "heb", "phonology", content)
+        assert result.get("success") is True

@@ -79,6 +79,8 @@ USFM_BOOK_DATA = {
     "3JN": ("3_john", "3 John"),
     "JUD": ("jude", "Jude"),
     "REV": ("revelation", "Revelation"),
+    # Deuterocanonical (dev-only, gated by feature flag)
+    "ENO": ("1_enoch", "1 Enoch"),
 }
 
 # Derived mappings for quick lookups
@@ -86,6 +88,11 @@ USFM_TO_BOOK_CODE = {code: data[0] for code, data in USFM_BOOK_DATA.items()}
 USFM_TO_BOOK_NAME = {code: data[1] for code, data in USFM_BOOK_DATA.items()}
 BOOK_CODE_TO_USFM = {data[0]: code for code, data in USFM_BOOK_DATA.items()}
 BOOK_NAME_TO_USFM = {data[1]: code for code, data in USFM_BOOK_DATA.items()}
+
+# Canonical OT book codes — derived from the NT boundary, not a magic count.
+# Raises ValueError loudly if "MAT" is ever missing from USFM_BOOK_DATA.
+_NT_START = list(USFM_BOOK_DATA.keys()).index("MAT")
+OT_BOOK_CODES = [book_code for book_code, _ in list(USFM_BOOK_DATA.values())[:_NT_START]]
 
 
 def usfm_code_to_book_code(usfm_code: str) -> Optional[str]:

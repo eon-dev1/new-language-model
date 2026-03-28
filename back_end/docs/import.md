@@ -29,17 +29,16 @@ POST /api/import-bible
 {
   "language_code": "bughotu",
   "language_name": "Bughotu",
-  "usfm_directory": "/path/to/usfm/files",
-  "translation_type": "human"
+  "usfm_directory": "/path/to/usfm/files"
 }
 ```
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `language_code` | string | Yes | - | Unique identifier (e.g., "bughotu", "kope") |
-| `language_name` | string | Yes | - | Display name (e.g., "Bughotu", "Kope") |
-| `usfm_directory` | string | Yes | - | Absolute path to directory containing USFM files |
-| `translation_type` | string | No | "human" | Either "human" or "ai" |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `language_code` | string | Yes | Unique identifier (e.g., "bughotu", "kope") |
+| `language_name` | string | Yes | Display name (e.g., "Bughotu", "Kope") |
+| `usfm_directory` | string | Yes | Absolute path to directory containing USFM files |
+| `human_verified` | boolean | No | Mark all imported verses as pre-verified (default: `false`) |
 
 ### Response Schema
 
@@ -105,17 +104,15 @@ Key markers:
 ```bash
 cd back_end
 
-# Import English NET Bible
+# Import English base language
 python -m utils.usfm_parser.usfm_importer \
-    ../data/bibles/engnet_usfm/ \
-    english \
-    human
+    ../data/bibles/eng-web_usfm/ \
+    english
 
 # Import a target language
 python -m utils.usfm_parser.usfm_importer \
     ../data/bibles/bughotu_usfm/ \
-    bughotu \
-    human
+    bughotu
 ```
 
 ---
@@ -134,17 +131,16 @@ POST /api/import-html-bible
 {
   "language_code": "bughotu",
   "language_name": "Bughotu",
-  "html_directory": "/path/to/html/files",
-  "translation_type": "human"
+  "html_directory": "/path/to/html/files"
 }
 ```
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `language_code` | string | Yes | - | Unique identifier |
-| `language_name` | string | Yes | - | Display name |
-| `html_directory` | string | Yes | - | Absolute path to directory containing HTML files |
-| `translation_type` | string | No | "human" | Either "human" or "ai" |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `language_code` | string | Yes | Unique identifier |
+| `language_name` | string | Yes | Display name |
+| `html_directory` | string | Yes | Absolute path to directory containing HTML files |
+| `human_verified` | boolean | No | Mark all imported verses as pre-verified (default: `false`) |
 
 ### Response Schema
 
@@ -255,20 +251,38 @@ cd back_end
 # Import HTML Bible
 python -m utils.html_parser.html_importer \
     ../data/bibles/bgt_html/ \
-    bughotu \
-    human
+    bughotu
 ```
 
 ---
 
 ## Import Behavior
 
+### Verification Status at Import
+
+The `human_verified` flag controls whether imported verses are marked as already reviewed.
+
+| Value | Meaning |
+|-------|---------|
+| `false` (default) | Verses require in-app verification before use |
+| `true` | Verses are pre-approved and skip the verification workflow |
+
+**When to use `human_verified: true`**: The translation has already been reviewed externally (e.g., by a translation committee) and does not need re-verification inside the NLM workflow.
+
+**Re-import behavior**: Re-importing always overwrites `human_verified` to the caller-supplied value using `$set`. This means:
+- Re-importing with `human_verified: true` marks all verses verified, even if they were unverified before.
+- Re-importing with `human_verified: false` (default) clears verification on any previously-verified verses.
+
+This is intentional — it allows correcting a mis-classified import. Be aware that re-importing with the default `false` will reset any in-app verification work done since the last import.
+
+**Mixed batches (two-folder import)**: To import some verses as pre-verified and others as unverified, perform two sequential POST requests pointing to different folders — one with `human_verified: true` and one with `human_verified: false`. The folders must contain *different* verses: if both contain the same verse, the second request overwrites the first.
+
 ### Upsert Logic
 
 Both importers use MongoDB upsert operations:
 - **New verses**: Inserted with `created_at` timestamp
 - **Existing verses**: Updated with new text, `updated_at` timestamp preserved
-- **Unique key**: `(language_code, book_code, chapter, verse, translation_type)`
+- **Unique key**: `(language_code, book_code, chapter, verse)`
 
 This makes re-imports safe and idempotent.
 
@@ -282,13 +296,12 @@ If the language doesn't exist, the import automatically creates a language docum
   "language_name": "Bughotu",
   "is_base_language": false,
   "status": "active",
-  "translation_levels": {
-    "human": {
-      "books_started": 27,
-      "verses_translated": 7957,
-      "last_updated": ISODate("...")
-    },
-    "ai": { /* zeroed */ }
+  "translation_stats": {
+    "books_started": 27,
+    "books_completed": 0,
+    "verses_translated": 7957,
+    "verses_verified": 0,
+    "last_updated": ISODate("...")
   }
 }
 ```
@@ -305,15 +318,13 @@ Imported verses are stored in the `bible_texts` collection:
   "book_code": "matthew",
   "chapter": 1,
   "verse": 1,
-  "translation_type": "human",
-  "english_text": "",           // Empty for non-English
   "translated_text": "...",     // The imported text
   "human_verified": false,      // Defaults to false
   "created_at": ISODate("...")
 }
 ```
 
-For English imports, text goes to `english_text` instead.
+For English imports, text goes to `english_text` instead of `translated_text`. The `human_verified` field is always stored (defaults to `false`) regardless of language.
 
 ---
 
@@ -342,4 +353,3 @@ If an import fails partway through:
 2. **Verify file naming** before HTML imports
 3. **Check response statistics** to confirm expected verse counts
 4. **Re-import is safe** - run again if something seems wrong
-5. **Translation type** defaults to "human" - specify "ai" for AI-generated content

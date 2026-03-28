@@ -7,48 +7,43 @@ Tools:
 - upsert_dictionary_entries: Insert/update entries with O(n+m) optimization
 
 Note: Dictionary uses embedded entries[] array pattern.
-One doc per (language, translation_type) with entries embedded.
+One doc per language with entries embedded.
 """
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from pydantic import ValidationError
+
+from constants import Collection
 from mcp_server.tools.base import (
     ToolError,
     error_response,
     success_response,
     validate_language,
-    validate_translation_type,
 )
+from routes.dictionary import CreateEntryRequest
 
 
-async def _get_dictionary_doc(
-    db, language_code: str, translation_type: str | None = None
-) -> dict | None:
+async def _get_dictionary_doc(db, language_code: str) -> dict | None:
     """
     Get dictionary document for a language.
 
     Args:
         db: MongoDBConnector instance
         language_code: Language code
-        translation_type: Optional filter
 
     Returns:
         Dictionary document or None
     """
     dictionaries = db.get_collection("dictionaries")
-
-    query = {"language_code": language_code.lower()}
-    if translation_type:
-        query["translation_type"] = translation_type
-
-    return await dictionaries.find_one(query)
+    return await dictionaries.find_one({"language_code": language_code.lower()})
 
 
 async def list_dictionary_entries(
     db,
     language_code: str,
-    translation_type: str | None = None,
     offset: int = 0,
     limit: int = 100,
     search: str | None = None,
@@ -59,7 +54,6 @@ async def list_dictionary_entries(
     Args:
         db: MongoDBConnector instance
         language_code: Language to get entries for
-        translation_type: Optional filter ("human" or "ai")
         offset: Number of entries to skip
         limit: Maximum entries to return
         search: Optional search term (searches word and definition)
@@ -78,14 +72,8 @@ async def list_dictionary_entries(
     except ToolError as e:
         return error_response(e)
 
-    # Validate translation type
-    try:
-        validate_translation_type(translation_type)
-    except ToolError as e:
-        return error_response(e)
-
     # Get dictionary document
-    doc = await _get_dictionary_doc(db, language_code, translation_type)
+    doc = await _get_dictionary_doc(db, language_code)
 
     if doc is None:
         return success_response(
@@ -118,7 +106,6 @@ async def get_dictionary_entry(
     db,
     language_code: str,
     word: str,
-    translation_type: str | None = None,
 ) -> dict[str, Any]:
     """
     Get a specific dictionary entry by word.
@@ -127,7 +114,6 @@ async def get_dictionary_entry(
         db: MongoDBConnector instance
         language_code: Language to search
         word: Word to find
-        translation_type: Optional filter ("human" or "ai")
 
     Returns:
         Entry document or error
@@ -138,14 +124,8 @@ async def get_dictionary_entry(
     except ToolError as e:
         return error_response(e)
 
-    # Validate translation type
-    try:
-        validate_translation_type(translation_type)
-    except ToolError as e:
-        return error_response(e)
-
     # Get dictionary document
-    doc = await _get_dictionary_doc(db, language_code, translation_type)
+    doc = await _get_dictionary_doc(db, language_code)
 
     if doc is None:
         return error_response(
@@ -174,7 +154,6 @@ async def get_dictionary_entry(
 async def upsert_dictionary_entries(
     db,
     language_code: str,
-    translation_type: str | None,
     entries: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """
@@ -185,7 +164,6 @@ async def upsert_dictionary_entries(
     Args:
         db: MongoDBConnector instance
         language_code: Target language
-        translation_type: Required ("human" or "ai")
         entries: List of entry dicts with word, definition, part_of_speech
 
     Returns:
@@ -194,22 +172,6 @@ async def upsert_dictionary_entries(
     # Validate language exists
     try:
         await validate_language(db, language_code)
-    except ToolError as e:
-        return error_response(e)
-
-    # translation_type is required for writes
-    if translation_type is None:
-        return error_response(
-            ToolError(
-                "invalid_input",
-                "translation_type is required for write operations",
-                {"translation_type": None},
-            )
-        )
-
-    # Validate translation type
-    try:
-        validate_translation_type(translation_type)
     except ToolError as e:
         return error_response(e)
 
@@ -236,10 +198,26 @@ async def upsert_dictionary_entries(
                 )
             )
 
+    # Validate and sanitize each entry via the shared Pydantic model
+    validated_entries = []
+    for entry in entries:
+        try:
+            validated = CreateEntryRequest.model_validate(entry)
+            validated_entries.append(validated.model_dump(exclude_unset=True))
+        except ValidationError as e:
+            return error_response(
+                ToolError(
+                    "validation_error",
+                    str(e),
+                    {"entry": entry},
+                )
+            )
+    entries = validated_entries
+
     dictionaries = db.get_collection("dictionaries")
 
     # Get existing dictionary document
-    doc = await _get_dictionary_doc(db, language_code, translation_type)
+    doc = await _get_dictionary_doc(db, language_code)
 
     if doc is None:
         # Create new dictionary document with entries
@@ -250,13 +228,13 @@ async def upsert_dictionary_entries(
 
         new_doc = {
             "language_code": language_code.lower(),
-            "translation_type": translation_type,
             "entries": entries,
             "entry_count": len(entries),
             "created_at": now,
         }
         await dictionaries.insert_one(new_doc)
 
+        await _sync_word_index_flags(db, language_code, entries)
         return success_response(
             {"created": len(entries), "updated": 0, "total": len(entries)}
         )
@@ -294,4 +272,24 @@ async def upsert_dictionary_entries(
 
     total = len(existing_entries) + created
 
+    await _sync_word_index_flags(db, language_code, entries)
     return success_response({"created": created, "updated": updated, "total": total})
+
+
+logger = logging.getLogger(__name__)
+
+
+async def _sync_word_index_flags(
+    db, language_code: str, entries: list[dict[str, Any]]
+) -> None:
+    """Update word index in_dictionary flags after dictionary entries are saved."""
+    try:
+        word_index_col = db.get_collection(Collection.WORD_INDEX)
+        new_words = [e["word"].lower() for e in entries if "word" in e]
+        if new_words:
+            await word_index_col.update_many(
+                {"language_code": language_code.lower(), "word": {"$in": new_words}},
+                {"$set": {"in_dictionary": True}},
+            )
+    except Exception as e:
+        logger.warning(f"Word index dictionary sync failed (non-fatal): {e}")

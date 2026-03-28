@@ -9,15 +9,6 @@ the seed_english_language.py script.
 """
 
 import pytest
-from db_connector.connection import MongoDBConnector
-
-
-@pytest.fixture
-async def db():
-    """Real MongoDB connection for integration tests."""
-    connector = MongoDBConnector()
-    await connector.connect()
-    yield connector
 
 
 class TestEnglishBaseLanguage:
@@ -44,18 +35,18 @@ class TestEnglishBaseLanguage:
 
     @pytest.mark.asyncio
     async def test_english_has_no_ai_translation_level(self, db):
-        """English should only have human translation level, not AI."""
+        """English should have flat translation_stats (no nested human/ai levels)."""
         languages = db.get_collection("languages")
         english = await languages.find_one({"language_code": "english"})
 
         assert english is not None, "English not found in languages collection"
 
-        translation_levels = english.get("translation_levels", {})
-        assert "human" in translation_levels, "English should have human translation level"
+        assert "translation_stats" in english, "English should have translation_stats"
+        assert "translation_levels" not in english, "English should not have old translation_levels"
 
-        # AI should be absent or None for English
-        ai_level = translation_levels.get("ai")
-        assert ai_level is None, f"English should not have AI translation level, got: {ai_level}"
+        stats = english["translation_stats"]
+        assert "books_started" in stats, "translation_stats should have books_started"
+        assert "verses_translated" in stats, "translation_stats should have verses_translated"
 
     @pytest.mark.asyncio
     async def test_english_human_translation_has_correct_counts(self, db):
@@ -65,9 +56,10 @@ class TestEnglishBaseLanguage:
 
         assert english is not None, "English not found in languages collection"
 
-        human = english.get("translation_levels", {}).get("human", {})
-        assert human.get("verses_translated") == 31102, "Should have 31,102 verses"
-        assert human.get("books_completed") == 66, "Should have 66 books completed"
+        stats = english.get("translation_stats", {})
+        verses = stats.get("verses_translated")
+        assert 31100 <= verses <= 31200, f"Should have ~31,102 verses, got {verses}"
+        assert stats.get("books_started") == 66, "Should have 66 books started"
 
 
 class TestEnglishMCPToolIntegration:

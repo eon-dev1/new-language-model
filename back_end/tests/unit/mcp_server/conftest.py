@@ -40,7 +40,7 @@ def _match_value(doc_value, query_value):
                     return False
             elif op == "$regex":
                 flags = re.IGNORECASE if query_value.get("$options") == "i" else 0
-                if not re.match(op_value, str(doc_value or ""), flags):
+                if not re.search(op_value, str(doc_value or ""), flags):
                     return False
             elif op == "$options":
                 # Skip - handled with $regex
@@ -55,11 +55,18 @@ def _match_value(doc_value, query_value):
 
 
 def _matches_query(doc, query):
-    """Check if a document matches a MongoDB query."""
+    """Check if a document matches a MongoDB query (supports $or, $and)."""
     for key, value in query.items():
-        doc_value = doc.get(key)
-        if not _match_value(doc_value, value):
-            return False
+        if key == "$or":
+            if not any(_matches_query(doc, clause) for clause in value):
+                return False
+        elif key == "$and":
+            if not all(_matches_query(doc, clause) for clause in value):
+                return False
+        else:
+            doc_value = doc.get(key)
+            if not _match_value(doc_value, value):
+                return False
     return True
 
 
@@ -72,12 +79,10 @@ TEST_LANGUAGES = [
         "is_base_language": True,
         "status": "active",
         "created_at": datetime(2024, 1, 1),
-        "translation_levels": {
-            "human": {
-                "books_started": 66,
-                "books_completed": 66,
-                "verses_translated": 31102,
-            }
+        "translation_stats": {
+            "books_started": 66,
+            "books_completed": 66,
+            "verses_translated": 31102,
         },
         "metadata": {"creator": "system"},
     },
@@ -88,9 +93,10 @@ TEST_LANGUAGES = [
         "is_base_language": False,
         "status": "active",
         "created_at": datetime(2024, 1, 1),
-        "translation_levels": {
-            "human": {"books_started": 5, "books_completed": 2, "verses_translated": 1500},
-            "ai": {"books_started": 10, "books_completed": 0, "verses_translated": 3000},
+        "translation_stats": {
+            "books_started": 5,
+            "books_completed": 2,
+            "verses_translated": 1500,
         },
         "metadata": {"creator": "test"},
     },
@@ -101,9 +107,10 @@ TEST_LANGUAGES = [
         "is_base_language": False,
         "status": "active",
         "created_at": datetime(2024, 1, 1),
-        "translation_levels": {
-            "human": {"books_started": 1, "books_completed": 0, "verses_translated": 2},
-            "ai": {"books_started": 1, "books_completed": 0, "verses_translated": 5},
+        "translation_stats": {
+            "books_started": 1,
+            "books_completed": 0,
+            "verses_translated": 2,
         },
         "metadata": {"creator": "test"},
     },
@@ -280,6 +287,98 @@ TEST_DICTIONARIES = [
     }
 ]
 
+TEST_LANGUAGE_NOTES = [
+    {
+        "_id": "notes_heb",
+        "language_code": "heb",
+        "notes": [
+            {
+                "id": "note-1",
+                "text": "Hebrew uses right-to-left script",
+                "created_at": datetime(2024, 1, 1),
+                "updated_at": datetime(2024, 3, 1),
+            },
+            {
+                "id": "note-2",
+                "text": "Verb conjugation changes by gender",
+                "created_at": datetime(2024, 1, 2),
+                "updated_at": datetime(2024, 2, 1),
+            },
+            {
+                "id": "note-3",
+                "text": "Nouns have masculine and feminine forms",
+                "created_at": datetime(2024, 1, 3),
+                "updated_at": datetime(2024, 1, 20),
+            },
+            {
+                "id": "note-4",
+                "text": "Construct state links two nouns",
+                "created_at": datetime(2024, 1, 4),
+                "updated_at": datetime(2024, 1, 15),
+            },
+            {
+                "id": "note-5",
+                "text": "Definite article ha- prefixed to noun",
+                "created_at": datetime(2024, 1, 5),
+                "updated_at": datetime(2024, 1, 10),
+            },
+        ],
+    }
+]
+
+TEST_CORRECTION_LOG = [
+    {
+        "_id": "corr-1",
+        "language_code": "heb",
+        "content_type": "bible_verse",
+        "content_reference": {"book": "genesis", "chapter": 1, "verse": 1},
+        "original_text": "In beginning God created the heavens",
+        "what_was_wrong": "Missing article before beginning",
+        "correction": "In the beginning God created the heavens",
+        "created_at": datetime(2024, 3, 1),
+    },
+    {
+        "_id": "corr-2",
+        "language_code": "heb",
+        "content_type": "dictionary_entry",
+        "content_reference": {"word": "שלום"},
+        "original_text": "shalom means peace only",
+        "what_was_wrong": "Incomplete: shalom also means hello and goodbye",
+        "correction": "shalom means peace, hello, and goodbye",
+        "created_at": datetime(2024, 2, 1),
+    },
+    {
+        "_id": "corr-3",
+        "language_code": "heb",
+        "content_type": "bible_verse",
+        "content_reference": {"book": "genesis", "chapter": 1, "verse": 2},
+        "original_text": "Earth was void",
+        "what_was_wrong": "Missing formless in the description",
+        "correction": "Earth was formless and void",
+        "created_at": datetime(2024, 1, 15),
+    },
+    {
+        "_id": "corr-4",
+        "language_code": "heb",
+        "content_type": "grammar_category",
+        "content_reference": {"category": "phonology"},
+        "original_text": "Hebrew has 22 letters",
+        "what_was_wrong": "Letters are consonants, not full characters",
+        "correction": "Hebrew has 22 consonant phonemes",
+        "created_at": datetime(2024, 1, 5),
+    },
+    {
+        "_id": "corr-5",
+        "language_code": "heb",
+        "content_type": "bible_verse",
+        "content_reference": {"book": "genesis", "chapter": 1, "verse": 3},
+        "original_text": "God said let there light",
+        "what_was_wrong": "Missing 'be' in the command",
+        "correction": "God said let there be light",
+        "created_at": datetime(2024, 1, 1),
+    },
+]
+
 TEST_GRAMMAR_SYSTEMS = [
     {
         "_id": "grammar_heb_human",
@@ -342,6 +441,8 @@ def mock_mcp_db():
         "bible_texts": TEST_BIBLE_TEXTS,
         "dictionaries": TEST_DICTIONARIES,
         "grammar_systems": TEST_GRAMMAR_SYSTEMS,
+        "language_notes": TEST_LANGUAGE_NOTES,
+        "correction_log": TEST_CORRECTION_LOG,
     }
 
     # Collection mocks cache

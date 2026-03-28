@@ -10,19 +10,29 @@ The NLM Backend follows a layered architecture designed for async operations, se
 |  (Electron Frontend / External HTTP Clients)                      |
 +------------------------------------------------------------------+
                               |
-                              | HTTP/REST (Bearer Token Auth)
+                              | HTTP/REST (no auth required)
                               v
 +------------------------------------------------------------------+
 |                     FASTAPI APPLICATION                           |
 |  main.py                                                          |
 |  +------------------------------------------------------------+  |
-|  |  Authentication Middleware (verify_api_key)                 |  |
+|  |  Request ID Middleware (request_id_middleware)              |  |
 |  +------------------------------------------------------------+  |
-|  |  Routes:                                                    |  |
-|  |  - /api/new-language     (POST)                            |  |
-|  |  - /api/languages        (GET)                             |  |
-|  |  - /api/bible-books      (GET)                             |  |
-|  |  - /api/check-connection (GET)                             |  |
+|  |  Routes (20 total, including):                              |  |
+|  |  - /api/new-language        (POST)                          |  |
+|  |  - /api/languages           (GET)                           |  |
+|  |  - /api/bible-books         (GET)                           |  |
+|  |  - /api/check-connection    (GET)                           |  |
+|  |  - /api/import-bible        (POST)                          |  |
+|  |  - /api/import-html-bible   (POST)                          |  |
+|  |  - /api/bible-reader        (GET)                           |  |
+|  |  - /api/dictionary          (GET/POST/PATCH)                |  |
+|  |  - /api/grammar             (GET/PATCH)                     |  |
+|  |  - /api/chat                (POST)                          |  |
+|  |  - /api/translate           (POST)                          |  |
+|  |  - /api/word-index          (GET)                           |  |
+|  |  - /api/correction-log      (GET/POST)                      |  |
+|  |  - (and more)                                               |  |
 |  +------------------------------------------------------------+  |
 +------------------------------------------------------------------+
                               |
@@ -37,22 +47,23 @@ The NLM Backend follows a layered architecture designed for async operations, se
 |  +------------------------------------------------------------+  |
 |  |  MongoDBConnector (connection.py)                           |  |
 |  |  - Async Motor client                                       |  |
-|  |  - Singleton pattern                                        |  |
+|  |  - Per-request via get_db() for REST routes                 |  |
+|  |  - Singleton via get_mongodb_connector() for MCP server     |  |
 |  |  - Health check functionality                               |  |
 |  +------------------------------------------------------------+  |
 +------------------------------------------------------------------+
                               |
                               v
 +------------------------------------------------------------------+
-|                    MONGODB ATLAS                                  |
-|  Database: nlm_db                                         |
+|                    MONGODB                                        |
+|  Database: nlm_db (default; set via DATABASE_NAME)               |
 |  +------------------------------------------------------------+  |
 |  |  Collections:                                               |  |
-|  |  - languages                                                |  |
-|  |  - bible_books                                              |  |
-|  |  - bible_texts                                              |  |
-|  |  - dictionaries                                             |  |
-|  |  - grammar_systems                                          |  |
+|  |  - languages          - bible_books                         |  |
+|  |  - bible_texts        - base_structure_bible                |  |
+|  |  - dictionaries       - grammar_systems                     |  |
+|  |  - word_index         - correction_log                      |  |
+|  |  - language_notes     - chat_conversations                  |  |
 |  +------------------------------------------------------------+  |
 +------------------------------------------------------------------+
 ```
@@ -63,18 +74,23 @@ The NLM Backend follows a layered architecture designed for async operations, se
 
 **Responsibilities**:
 - Initialize FastAPI application with metadata
-- Register route handlers with `/api` prefix
+- Register 20 route handlers with `/api` prefix
+- Attach request ID middleware for log tracing
 - Start Uvicorn server on localhost:8221
 
-**Note**: API authentication has been disabled for local development. MongoDB provides its own authentication layer.
+**Note**: API authentication has been disabled. No `verify_api_key` or Bearer token is required. MongoDB provides its own authentication layer.
 
 **Key Components**:
 ```python
-# Route registration (no auth dependency for local development)
-app.include_router(
-    new_language_router,
-    prefix="/api"
-)
+# Route registration — no auth dependency
+app.include_router(new_language_router, prefix="/api")
+
+# Only middleware: attaches a short UUID to each request for log correlation
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next): ...
+
+# Port read directly from OS environment — no .env file loaded
+FAST_API_PORT = int(os.getenv('FAST_API_PORT', 8221))
 ```
 
 ### db_connector/ - Database Connection Layer
@@ -89,25 +105,25 @@ app.include_router(
 
 **Two-Tier Credential System Flow**:
 ```
-+---------------------------+
-| mongo_credentials_path.env |
-| (Tier 1 - In Repository)   |
-+---------------------------+
++---------------------------------------+
+| db_connector/mongo_credentials_path.env|
+| (Tier 1 - In Repository)               |
+| - MONGODB_CREDENTIALS_PATH             |
+| - DATABASE_NAME                        |
++---------------------------------------+
             |
             | Contains path to:
             v
-+---------------------------+
-| Actual Credentials File    |
-| (Tier 2 - Secure Location) |
-+---------------------------+
++---------------------------------------+
+| Actual Credentials File                |
+| (Tier 2 - External, secure location)   |
+| - MONGODB_CONNECTION_STRING            |
++---------------------------------------+
             |
-            | Contains:
-            | - MONGODB_CONNECTION_STRING
-            | - FAST_API_KEY
             v
-+---------------------------+
-| MongoDBSettings Instance   |
-+---------------------------+
++---------------------------------------+
+| MongoDBSettings Instance               |
++---------------------------------------+
 ```
 
 #### connection.py - MongoDB Connector
@@ -150,8 +166,8 @@ app.include_router(
 **Responsibilities**:
 - Validate language name input
 - Create language metadata document
-- Generate Bible book structures (human + AI versions)
-- Initialize dictionary and grammar frameworks
+- Generate 66 Bible book structure documents (one per book)
+- Initialize dictionary and grammar frameworks (one each)
 - Create database indexes
 
 **Data Flow for New Language Creation**:
@@ -174,20 +190,19 @@ Input: language="Kope"
           v
     +------------------+
     | Create 66 Books  |
-    | (Human + AI)     |
-    | = 132 documents  |
+    | (one per book)   |
     +------------------+
           |
           v
     +------------------+
     | Create Dictionary|
-    | Framework (x2)   |
+    | Framework (x1)   |
     +------------------+
           |
           v
     +------------------+
     | Create Grammar   |
-    | System (x2)      |
+    | System (x1)      |
     +------------------+
           |
           v
@@ -225,19 +240,14 @@ BIBLE_CHAPTER_VERSES = {
 
 **Purpose**: Abstract base class defining the interface for Bible collection management.
 
-**Key Methods**:
+**Abstract Methods** (subclasses must implement):
+- `create_collection()` - Create the collection in the database
+- `populate_collection()` - Populate the collection with data
+
+**Concrete Helper Methods**:
 - `create_bible_document()` - Create standardized document structure
 - `create_bible_indexes()` - Set up efficient query indexes
 - `get_collection_stats()` - Retrieve collection statistics
-
-### inference/ - LLM Service Interfaces
-
-**Purpose**: Define abstract interfaces for LLM provider integration.
-
-**Key Abstractions**:
-- `LLMService` - Core service interface for translation and analysis
-- `LLMProvider` - Provider implementation base class
-- `ProviderFactory` - Protocol for creating provider instances
 
 ## Async Patterns
 
@@ -287,7 +297,7 @@ async def get_mongodb_connector() -> MongoDBConnector:
     return _global_connector
 ```
 
-**Note**: Currently, the `new_language.py` route creates its own connector instance per request. Migration to the global singleton is recommended for production.
+**Note**: REST routes use `Depends(get_db)` from `routes/dependencies.py`, which creates and tears down a connector per request. The global `get_mongodb_connector()` singleton is used by the MCP server for long-lived AI sessions, not by REST routes.
 
 ## Security Architecture
 
@@ -324,26 +334,24 @@ Client Request
 ## Configuration Flow
 
 ```
-+-------------------+     +----------------------+
-| fastapi.env       | --> | Environment          |
-| CREDENTIALS_PATH  |     | Variables Loaded     |
-| FAST_API_PORT     |     +----------------------+
-+-------------------+              |
-                                   v
-+-------------------+     +----------------------+
-| mongo_credentials |     | MongoDBSettings      |
-| _path.env         | --> | Two-tier Loading     |
-| - PATH            |     | - Connection String  |
-| - DATABASE_NAME   |     | - Database Name      |
-+-------------------+     +----------------------+
-        |                          |
-        v                          v
-+-------------------+     +----------------------+
-| Actual Credentials|     | MongoDBConnector     |
-| File (external)   |     | Initialized          |
-| - CONNECTION_STR  |     +----------------------+
-| - FAST_API_KEY    |
-+-------------------+
++-------------------------------------------+
+| OS Environment                            |
+| FAST_API_PORT (read directly by main.py)  |
++-------------------------------------------+
+
++-------------------------------------------+     +----------------------+
+| db_connector/mongo_credentials_path.env   | --> | MongoDBSettings      |
+| (Tier 1 - in repository)                  |     | Two-tier Loading     |
+| - MONGODB_CREDENTIALS_PATH                |     | - Connection String  |
+| - DATABASE_NAME                           |     | - Database Name      |
++-------------------------------------------+     +----------------------+
+        |                                                    |
+        v                                                    v
++-------------------------------------------+     +----------------------+
+| Actual Credentials File (Tier 2)          |     | MongoDBConnector     |
+| (external, not in repository)             |     | Initialized          |
+| - MONGODB_CONNECTION_STRING               |     +----------------------+
++-------------------------------------------+
 ```
 
 ## Error Handling Strategy
@@ -353,7 +361,6 @@ Client Request
 | Status Code | Usage |
 |------------|-------|
 | 400 | Invalid input (e.g., bad language name) |
-| 401 | Invalid or missing API key |
 | 500 | Internal server error (database failures, etc.) |
 
 ### Exception Handling Pattern

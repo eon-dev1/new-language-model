@@ -12,6 +12,7 @@ import {
 } from '@mui/material';
 import { ArrowBack } from '@mui/icons-material';
 import { LanguageProject, ResourceType } from '../renderer/types/LanguageProject';
+import { TOPBAR_HEIGHT } from '../renderer/constants';
 
 interface ProjectResourcesProps {
   project: LanguageProject;
@@ -29,9 +30,9 @@ export function ProjectResources({ project, resourceType, onBack }: ProjectResou
       case 'nlmDictionary':
         return 'NLM Dictionary';
       case 'humanGrammar':
-        return 'Human Grammar';
+        return 'Human Memories';
       case 'nlmGrammar':
-        return 'NLM Grammar';
+        return 'NLM Memories';
       default:
         return 'Resource';
     }
@@ -62,7 +63,7 @@ export function ProjectResources({ project, resourceType, onBack }: ProjectResou
       sx={{
         minHeight: '100vh',
         background: 'linear-gradient(135deg, #1A1A1A, #2D2D2D)',
-        pt: 7,  // 56px to clear fixed TopBar (48px)
+        pt: `${TOPBAR_HEIGHT + 8}px`,
         pb: 4,
       }}
     >

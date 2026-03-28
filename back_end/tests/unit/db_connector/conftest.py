@@ -1,13 +1,11 @@
 # tests/unit/db_connector/conftest.py
 """
-Pytest fixtures for MongoDB db_connector tests.
+Pytest fixtures for MongoDB db_connector unit tests (no live DB required).
 
 Fixture Dependency Graph:
     mongodb_settings (sync)
            ↓
     connector (async, unconnected)
-           ↓
-    connected_connector (async, connected with auto-cleanup)
 """
 
 import pytest
@@ -46,20 +44,6 @@ async def connector(mongodb_settings):
     Use this when testing connection establishment itself.
     """
     return MongoDBConnector(mongodb_settings)
-
-
-@pytest_asyncio.fixture
-async def connected_connector(mongodb_settings):
-    """
-    Provide a connected MongoDBConnector with automatic cleanup.
-
-    Uses yield to ensure disconnect() is called even if test fails.
-    This is the primary fixture for tests requiring database access.
-    """
-    connector = MongoDBConnector(mongodb_settings)
-    await connector.connect()
-    yield connector
-    await connector.disconnect()
 
 
 # === INVALID SETTINGS FIXTURES ===

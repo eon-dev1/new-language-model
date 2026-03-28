@@ -9,6 +9,7 @@ import logging
 from typing import AsyncGenerator
 from fastapi import HTTPException
 from db_connector.connection import MongoDBConnector
+from db_connector.settings import MongoDBSettings
 
 logger = logging.getLogger(__name__)
 
@@ -54,3 +55,22 @@ async def get_db() -> AsyncGenerator[MongoDBConnector, None]:
         yield connector
     finally:
         await connector.disconnect()
+
+
+def get_db_settings() -> MongoDBSettings:
+    """
+    Lightweight dependency for MongoDB connection settings.
+
+    Returns configuration (connection string, database name) without opening
+    a connection. Used for operations that only need config, not database access.
+
+    Usage:
+        @router.post("/backup-database")
+        async def backup_database(settings: MongoDBSettings = Depends(get_db_settings)):
+            # Use settings.mongodb_connection_string, settings.database_name
+            ...
+
+    Returns:
+        MongoDBSettings: MongoDB configuration loaded from credential files (~1ms)
+    """
+    return MongoDBSettings.create_from_credentials()

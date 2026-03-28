@@ -1,9 +1,11 @@
 // main.ts
+import { closeLog } from './logger';
 
 import { app, BrowserWindow, Menu, MenuItemConstructorOptions, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import { getDevToolsState, getStartupPreference, toggleDevTools as toggleDevToolsState, initDevToolsManager } from './devtools-manager';
 import { ensureBackendRunning, stopBackend, isBackendManagedByUs } from './backend-manager';
+import { ensureMongodRunning, stopMongod } from './mongod-manager';
 
 // Initialize DevTools manager and get saved state
 // We'll pass the mainWindow after it's created
@@ -92,6 +94,8 @@ function createWindow() {
     },
   });
 
+  mainWindow.maximize();
+
   // Since __dirname points to dist/main after build,
   // our index.html is in dist/renderer. We set the path accordingly.
   const indexPath = path.join(__dirname, '../renderer/index.html');
@@ -130,6 +134,23 @@ function createWindow() {
     updateMenu();
   });
 
+  mainWindow.webContents.on('context-menu', (_e, params) => {
+    const items: MenuItemConstructorOptions[] = [];
+
+    if (params.isEditable) {
+      if (params.editFlags.canCut)       items.push({ label: 'Cut',        role: 'cut' });
+      if (params.editFlags.canCopy)      items.push({ label: 'Copy',       role: 'copy' });
+      if (params.editFlags.canPaste)     items.push({ label: 'Paste',      role: 'paste' });
+      if (params.editFlags.canSelectAll) items.push({ label: 'Select All', role: 'selectAll' });
+    } else if (params.selectionText) {
+      items.push({ label: 'Copy', role: 'copy' });
+    }
+
+    if (items.length > 0) {
+      Menu.buildFromTemplate(items).popup();
+    }
+  });
+
   const menu = createMainMenu();
   Menu.setApplicationMenu(menu);
   console.log("Main window menu created and set with DevTools options");
@@ -140,12 +161,14 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
-// Clean up backend when app is quitting
+// Clean up backend and mongod when app is quitting
 app.on('will-quit', () => {
   if (isBackendManagedByUs()) {
     console.log("App quitting - stopping backend server we started...");
-    stopBackend();
+    stopBackend();  // backend first (holds DB connections)
   }
+  stopMongod();   // then mongod (no-op if not managed by us)
+  closeLog();     // flush and close log stream last
 });
 
 // IPC handlers for window controls
@@ -186,13 +209,40 @@ app.on('activate', () => {
 });
 
 app.whenReady().then(async () => {
-  console.log("App is ready. Ensuring backend is running...");
+  console.log("App is ready. Starting bundled mongod...");
+
+  const mongodReady = await ensureMongodRunning();
+  if (!mongodReady) {
+    console.warn("Bundled mongod could not start.");
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: 'Database Unavailable',
+      message: 'The bundled database could not be started.',
+      detail: 'Try re-installing the application if the problem persists.',
+      buttons: ['Quit', 'Continue Anyway'],
+      defaultId: 0,
+    });
+    if (response === 0) {
+      app.quit();
+      return;
+    }
+  }
+
+  console.log("Ensuring backend is running...");
 
   const backendReady = await ensureBackendRunning();
-
   if (!backendReady) {
-    console.error("Failed to start backend server. App may not function correctly.");
-    // Continue anyway - user might start backend manually
+    console.error("Failed to start backend server after 30 attempts.");
+    await dialog.showMessageBox({
+      type: 'error',
+      title: 'Backend Failed to Start',
+      message: 'The NLM backend server could not be started.',
+      detail: 'Check that Python and the virtual environment are correctly installed in nlm_backend_venv.',
+      buttons: ['Quit'],
+      defaultId: 0,
+    });
+    app.quit();
+    return;
   }
 
   console.log("Creating window...");

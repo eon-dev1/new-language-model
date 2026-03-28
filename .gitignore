@@ -19,7 +19,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
-nlm_standalone/back_end/nlm_backend_venv/
+back_end/nlm_backend_venv/
 *_venv*/
 *venv*/
 .venv/
@@ -27,22 +27,23 @@ venv/
 ENV/
 env/
 poetry.lock
+!*.env.example 
 
 # ======================
 # Node.js / Frontend
 # ======================
 node_modules/
-nlm_standalone/front_end/dist/
+front_end/dist/
 
 # ======================
-# Claude Code
+# AI
 # ======================
 .claude/
 
 # ======================
 # Data (large files)
 # ======================
-data/bibles/
+data/
 
 
 # ===========================
@@ -58,3 +59,13 @@ Thumbs.db
 desktop.ini
 $RECYCLE.BIN/
 *.lnk
+
+# Logs
+*.log 
+logs/
+
+# Misc
+__plans__/
+
+.mcp.json
+

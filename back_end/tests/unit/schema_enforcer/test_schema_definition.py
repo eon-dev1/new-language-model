@@ -11,19 +11,22 @@ import pytest
 class TestExpectedCollections:
     """Tests for EXPECTED_COLLECTIONS schema definition"""
 
-    def test_expected_collections_has_six_entries(self):
-        """Schema defines exactly 6 collections"""
+    def test_expected_collections_has_required_core_collections(self):
+        """Schema defines all 7 core collections (plus optional collections added since)"""
         from utils.schema_enforcer.schema_definition import EXPECTED_COLLECTIONS
 
-        assert len(EXPECTED_COLLECTIONS) == 6
-        assert set(EXPECTED_COLLECTIONS.keys()) == {
+        core = {
             "languages",
             "bible_books",
             "bible_texts",
             "base_structure_bible",
             "dictionaries",
             "grammar_systems",
+            "word_index",
         }
+        assert core.issubset(set(EXPECTED_COLLECTIONS.keys())), (
+            f"Missing core collections: {core - set(EXPECTED_COLLECTIONS.keys())}"
+        )
 
     def test_all_collections_have_required_fields(self):
         """Every collection defines required_fields dict"""

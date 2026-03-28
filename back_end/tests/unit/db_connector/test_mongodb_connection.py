@@ -1,24 +1,19 @@
 # tests/unit/db_connector/test_mongodb_connection.py
 """
-MongoDB Connection Tests - Pytest Style
+MongoDB Connection Unit Tests
 
-Refactored from the original standalone MongoDBConnectionTester class.
-All tests use pytest fixtures for proper isolation and cleanup.
+Tests that require NO live database connection.
+Tests requiring a real MongoDB instance live in tests/integration/test_mongodb_connection.py.
 
 Test Categories:
     1. Settings Loading - Credential system validation
-    2. Connection Establishment - Connect/disconnect lifecycle
-    3. Basic Operations - Ping, server info, collections
-    4. Health Check - Monitoring functionality
-    5. Error Handling - Invalid connections, uninitialized state
-    6. Connection Cleanup - Disconnect, reconnect, context manager
+    2. Connection Establishment - Pre-connection state only
+    3. Error Handling - Invalid settings, uninitialized state
 """
 
-import asyncio
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 
 from db_connector.settings import MongoDBSettings
 from db_connector.connection import MongoDBConnector
@@ -81,137 +76,12 @@ class TestSettingsLoading:
 # =============================================================================
 
 class TestConnectionEstablishment:
-    """Test MongoDB connection lifecycle."""
-
-    @pytest.mark.asyncio
-    async def test_connect_success(self, connector):
-        """Connector should establish connection successfully."""
-        await connector.connect()
-        assert connector.is_connected
-        await connector.disconnect()
+    """Test MongoDB connection initial state (no live DB required)."""
 
     @pytest.mark.asyncio
     async def test_is_connected_before_connect(self, connector):
         """Connector should report not connected before connect() called."""
         assert not connector.is_connected
-
-    @pytest.mark.asyncio
-    async def test_is_connected_after_connect(self, connected_connector):
-        """Connector should report connected after successful connect()."""
-        assert connected_connector.is_connected
-
-    @pytest.mark.asyncio
-    async def test_get_client_returns_motor_client(self, connected_connector):
-        """get_client() should return a Motor client instance."""
-        client = connected_connector.get_client()
-        assert client is not None
-        # Verify it's a Motor client by checking for expected method
-        assert hasattr(client, "admin")
-
-    @pytest.mark.asyncio
-    async def test_get_database_returns_database(self, connected_connector):
-        """get_database() should return the configured database."""
-        database = connected_connector.get_database()
-        assert database is not None
-        assert database.name  # Should have a name
-
-    @pytest.mark.asyncio
-    async def test_database_name_matches_settings(self, connected_connector, mongodb_settings):
-        """Database name should match the configured name."""
-        database = connected_connector.get_database()
-        assert database.name == mongodb_settings.database_name
-
-
-# =============================================================================
-# BASIC OPERATIONS TESTS
-# =============================================================================
-
-class TestBasicOperations:
-    """Test fundamental database operations."""
-
-    @pytest.mark.asyncio
-    async def test_ping_succeeds(self, connected_connector):
-        """Ping command should succeed on connected database."""
-        client = connected_connector.get_client()
-        result = await client.admin.command("ping")
-        assert result.get("ok") == 1
-
-    @pytest.mark.asyncio
-    async def test_server_info_available(self, connected_connector):
-        """Server info should be retrievable."""
-        client = connected_connector.get_client()
-        server_info = await client.server_info()
-
-        assert "version" in server_info
-        assert server_info["version"]  # Not empty
-
-    @pytest.mark.asyncio
-    async def test_list_collection_names(self, connected_connector):
-        """Should be able to list collection names."""
-        database = connected_connector.get_database()
-        collection_names = await database.list_collection_names()
-
-        # Result should be a list (may be empty for fresh database)
-        assert isinstance(collection_names, list)
-
-    @pytest.mark.asyncio
-    async def test_database_stats_accessible(self, connected_connector):
-        """Database stats command should succeed."""
-        database = connected_connector.get_database()
-
-        try:
-            stats = await database.command("dbstats")
-            assert "collections" in stats or "ok" in stats
-        except Exception:
-            # Some MongoDB configurations may restrict dbstats
-            pytest.skip("dbstats command not accessible in this configuration")
-
-
-# =============================================================================
-# HEALTH CHECK TESTS
-# =============================================================================
-
-class TestHealthCheck:
-    """Test the health check monitoring functionality."""
-
-    @pytest.mark.asyncio
-    async def test_health_check_returns_dict(self, connected_connector):
-        """health_check() should return a dictionary."""
-        health_info = await connected_connector.health_check()
-        assert isinstance(health_info, dict)
-
-    @pytest.mark.asyncio
-    async def test_health_check_connected_status(self, connected_connector):
-        """Health check should report connected status."""
-        health_info = await connected_connector.health_check()
-        assert health_info.get("connected") is True
-
-    @pytest.mark.asyncio
-    async def test_health_check_ping_success(self, connected_connector):
-        """Health check should report successful ping."""
-        health_info = await connected_connector.health_check()
-        assert health_info.get("ping_success") is True
-
-    @pytest.mark.asyncio
-    async def test_health_check_database_name(self, connected_connector, mongodb_settings):
-        """Health check should report correct database name."""
-        health_info = await connected_connector.health_check()
-        assert health_info.get("database") == mongodb_settings.database_name
-
-    @pytest.mark.asyncio
-    async def test_health_check_collections_count(self, connected_connector):
-        """Health check should include collections count."""
-        health_info = await connected_connector.health_check()
-        assert "collections_count" in health_info
-        assert isinstance(health_info["collections_count"], int)
-
-    @pytest.mark.asyncio
-    async def test_health_check_server_info(self, connected_connector):
-        """Health check should include server info."""
-        health_info = await connected_connector.health_check()
-
-        if "server_info" in health_info and health_info["server_info"]:
-            assert "version" in health_info["server_info"]
 
 
 # =============================================================================
@@ -219,17 +89,7 @@ class TestHealthCheck:
 # =============================================================================
 
 class TestErrorHandling:
-    """Test error conditions and exception handling."""
-
-    @pytest.mark.asyncio
-    @pytest.mark.timeout(15)
-    async def test_invalid_connection_string_raises(self, invalid_mongodb_settings):
-        """Connection with invalid URI should raise exception."""
-        connector = MongoDBConnector(invalid_mongodb_settings)
-
-        with pytest.raises(Exception):
-            # Should timeout or raise connection error
-            await connector.connect()
+    """Test error conditions that don't require a live database."""
 
     def test_get_client_before_connect_raises(self, mongodb_settings):
         """get_client() before connect() should raise RuntimeError."""
@@ -260,85 +120,3 @@ class TestErrorHandling:
                 mongodb_connection_string="mongodb://localhost:27017",
                 database_name=""
             )
-
-
-# =============================================================================
-# CONNECTION CLEANUP TESTS
-# =============================================================================
-
-class TestConnectionCleanup:
-    """Test connection cleanup and resource management."""
-
-    @pytest.mark.asyncio
-    async def test_disconnect_updates_status(self, mongodb_settings):
-        """disconnect() should update is_connected to False."""
-        connector = MongoDBConnector(mongodb_settings)
-        await connector.connect()
-        assert connector.is_connected
-
-        await connector.disconnect()
-        assert not connector.is_connected
-
-    @pytest.mark.asyncio
-    async def test_reconnection_after_disconnect(self, mongodb_settings):
-        """Should be able to reconnect after disconnecting."""
-        connector = MongoDBConnector(mongodb_settings)
-
-        # First connection
-        await connector.connect()
-        assert connector.is_connected
-
-        # Disconnect
-        await connector.disconnect()
-        assert not connector.is_connected
-
-        # Reconnect
-        await connector.connect()
-        assert connector.is_connected
-
-        # Cleanup
-        await connector.disconnect()
-
-    @pytest.mark.asyncio
-    async def test_context_manager_connects(self, mongodb_settings):
-        """Context manager should establish connection."""
-        async with MongoDBConnector(mongodb_settings) as connector:
-            assert connector.is_connected
-
-    @pytest.mark.asyncio
-    async def test_context_manager_disconnects_on_exit(self, mongodb_settings):
-        """Context manager should disconnect on exit."""
-        connector = None
-        async with MongoDBConnector(mongodb_settings) as ctx_connector:
-            connector = ctx_connector
-            assert connector.is_connected
-
-        # After exiting context, should be disconnected
-        assert not connector.is_connected
-
-    @pytest.mark.asyncio
-    async def test_context_manager_disconnects_on_exception(self, mongodb_settings):
-        """Context manager should disconnect even if exception raised."""
-        connector = None
-
-        with pytest.raises(ValueError):
-            async with MongoDBConnector(mongodb_settings) as ctx_connector:
-                connector = ctx_connector
-                assert connector.is_connected
-                raise ValueError("Intentional test exception")
-
-        # Should still be disconnected despite exception
-        assert not connector.is_connected
-
-    @pytest.mark.asyncio
-    async def test_multiple_disconnect_calls_safe(self, mongodb_settings):
-        """Multiple disconnect() calls should not raise."""
-        connector = MongoDBConnector(mongodb_settings)
-        await connector.connect()
-
-        # Multiple disconnects should be safe
-        await connector.disconnect()
-        await connector.disconnect()  # Should not raise
-        await connector.disconnect()  # Should not raise
-
-        assert not connector.is_connected

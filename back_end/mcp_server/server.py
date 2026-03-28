@@ -27,6 +27,13 @@ from mcp_server.tools.dictionary import upsert_dictionary_entries as _upsert_dic
 from mcp_server.tools.grammar import list_grammar_categories as _list_grammar_categories
 from mcp_server.tools.grammar import get_grammar_category as _get_grammar_category
 from mcp_server.tools.grammar import update_grammar_category as _update_grammar_category
+from mcp_server.tools.word_index import get_word_index as _get_word_index
+from mcp_server.tools.word_index import get_words_not_in_dictionary as _get_words_not_in_dictionary
+from mcp_server.tools.word_index import get_word_frequency_list as _get_word_frequency_list
+from mcp_server.tools.memories import list_language_notes as _list_language_notes
+from mcp_server.tools.memories import search_language_notes as _search_language_notes
+from mcp_server.tools.memories import list_correction_log as _list_correction_log
+from mcp_server.tools.memories import search_correction_log as _search_correction_log
 
 
 # Initialize MCP server
@@ -82,20 +89,17 @@ async def get_language_info(language_code: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def list_bible_books(
-    language_code: str, translation_type: str | None = None
-) -> dict[str, Any]:
+async def list_bible_books(language_code: str) -> dict[str, Any]:
     """
     Get all Bible books for a language.
 
     Args:
         language_code: Language code (e.g., 'english', 'heb')
-        translation_type: Optional filter ('human' or 'ai')
 
     Returns books sorted by canonical order (1-66) with chapter counts.
     """
     db = await get_db()
-    return await _list_bible_books(db, language_code, translation_type)
+    return await _list_bible_books(db, language_code)
 
 
 @mcp.tool()
@@ -103,7 +107,6 @@ async def get_chapter(
     language_code: str,
     book_code: str,
     chapter: int,
-    translation_type: str | None = None,
 ) -> dict[str, Any]:
     """
     Get all verses for a Bible chapter.
@@ -112,12 +115,11 @@ async def get_chapter(
         language_code: Language code (e.g., 'english', 'heb')
         book_code: Book code (e.g., 'genesis', '1_chronicles')
         chapter: Chapter number (1-indexed)
-        translation_type: Optional filter ('human' or 'ai')
 
     Returns verses with text and human_verified status (non-English only).
     """
     db = await get_db()
-    return await _get_chapter(db, language_code, book_code, chapter, translation_type)
+    return await _get_chapter(db, language_code, book_code, chapter)
 
 
 @mcp.tool()
@@ -126,7 +128,6 @@ async def get_bible_chunk(
     book_code: str | None = None,
     offset: int = 0,
     limit: int = 100,
-    translation_type: str | None = None,
     save_to_file: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -137,7 +138,6 @@ async def get_bible_chunk(
         book_code: Optional book filter (e.g., 'genesis')
         offset: Number of verses to skip (default 0)
         limit: Maximum verses to return (default 100, max 500)
-        translation_type: Optional filter ('human' or 'ai')
         save_to_file: Optional filename to save results to temp_files/ directory.
                       Use alphanumeric, underscore, hyphen only (e.g., 'bughotu_batch1').
                       If provided, returns {saved_to, record_count} instead of full data.
@@ -147,7 +147,7 @@ async def get_bible_chunk(
     """
     db = await get_db()
     return await _get_bible_chunk(
-        db, language_code, book_code, offset, limit, translation_type, save_to_file
+        db, language_code, book_code, offset, limit, save_to_file
     )
 
 
@@ -158,7 +158,6 @@ async def save_bible_batches(
     batch_start: int = 1,
     batch_end: int | None = None,
     book_code: str | None = None,
-    translation_type: str | None = None,
     filename_prefix: str | None = None,
 ) -> dict[str, Any]:
     """
@@ -172,7 +171,6 @@ async def save_bible_batches(
         batch_start: First batch number, 1-indexed (default 1)
         batch_end: Last batch number inclusive (None = all remaining batches)
         book_code: Optional book filter (e.g., 'genesis')
-        translation_type: Optional filter ('human' or 'ai')
         filename_prefix: Prefix for files (default: '{lang}_batch')
 
     Returns:
@@ -193,7 +191,7 @@ async def save_bible_batches(
     db = await get_db()
     return await _save_bible_batches(
         db, language_code, batch_size, batch_start, batch_end,
-        book_code, translation_type, filename_prefix
+        book_code, filename_prefix
     )
 
 
@@ -220,7 +218,7 @@ async def get_parallel_verses(
 
     Returns:
         {
-            "parallel_verses": [{book_code, chapter, verse, translations: {lang: {text, translation_type, human_verified?}}}],
+            "parallel_verses": [{book_code, chapter, verse, translations: {lang: {text, human_verified?}}}],
             "languages": list of language codes,
             "book_code": str,
             "chapter": int,
@@ -253,7 +251,6 @@ async def get_parallel_verses(
 @mcp.tool()
 async def list_dictionary_entries(
     language_code: str,
-    translation_type: str | None = None,
     offset: int = 0,
     limit: int = 100,
     search: str | None = None,
@@ -263,7 +260,6 @@ async def list_dictionary_entries(
 
     Args:
         language_code: Language code (e.g., 'heb', 'kope')
-        translation_type: Optional filter ('human' or 'ai')
         offset: Number of entries to skip (default 0)
         limit: Maximum entries to return (default 100)
         search: Optional search term (searches word and definition)
@@ -271,14 +267,13 @@ async def list_dictionary_entries(
     Returns entries with pagination info.
     """
     db = await get_db()
-    return await _list_dictionary_entries(db, language_code, translation_type, offset, limit, search)
+    return await _list_dictionary_entries(db, language_code, offset, limit, search)
 
 
 @mcp.tool()
 async def get_dictionary_entry(
     language_code: str,
     word: str,
-    translation_type: str | None = None,
 ) -> dict[str, Any]:
     """
     Get a specific dictionary entry by word.
@@ -286,18 +281,16 @@ async def get_dictionary_entry(
     Args:
         language_code: Language code (e.g., 'heb', 'kope')
         word: Word to look up (exact match)
-        translation_type: Optional filter ('human' or 'ai')
 
     Returns entry with definition, part of speech, and examples.
     """
     db = await get_db()
-    return await _get_dictionary_entry(db, language_code, word, translation_type)
+    return await _get_dictionary_entry(db, language_code, word)
 
 
 @mcp.tool()
 async def upsert_dictionary_entries(
     language_code: str,
-    translation_type: str,
     entries: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """
@@ -305,14 +298,13 @@ async def upsert_dictionary_entries(
 
     Args:
         language_code: Target language code
-        translation_type: Required ('human' or 'ai')
         entries: List of entry dicts with word, definition, part_of_speech
 
     Returns counts of created and updated entries.
     Each entry must have: word, definition, part_of_speech (optional: examples)
     """
     db = await get_db()
-    return await _upsert_dictionary_entries(db, language_code, translation_type, entries)
+    return await _upsert_dictionary_entries(db, language_code, entries)
 
 
 # =============================================================================
@@ -321,29 +313,24 @@ async def upsert_dictionary_entries(
 
 
 @mcp.tool()
-async def list_grammar_categories(
-    language_code: str,
-    translation_type: str | None = None,
-) -> dict[str, Any]:
+async def list_grammar_categories(language_code: str) -> dict[str, Any]:
     """
     List all grammar categories with content status.
 
     Args:
         language_code: Language code (e.g., 'heb', 'kope')
-        translation_type: Optional filter ('human' or 'ai')
 
     Returns 5 categories: phonology, morphology, syntax, semantics, discourse.
     Each shows has_content boolean indicating if populated.
     """
     db = await get_db()
-    return await _list_grammar_categories(db, language_code, translation_type)
+    return await _list_grammar_categories(db, language_code)
 
 
 @mcp.tool()
 async def get_grammar_category(
     language_code: str,
     category: str,
-    translation_type: str | None = None,
 ) -> dict[str, Any]:
     """
     Get specific grammar category content.
@@ -351,19 +338,17 @@ async def get_grammar_category(
     Args:
         language_code: Language code (e.g., 'heb', 'kope')
         category: Category name (phonology, morphology, syntax, semantics, discourse)
-        translation_type: Optional filter ('human' or 'ai')
 
     Returns category with description, subcategories, notes, and examples.
     """
     db = await get_db()
-    return await _get_grammar_category(db, language_code, category, translation_type)
+    return await _get_grammar_category(db, language_code, category)
 
 
 @mcp.tool()
 async def update_grammar_category(
     language_code: str,
     category: str,
-    translation_type: str,
     content: dict[str, Any],
 ) -> dict[str, Any]:
     """
@@ -372,13 +357,169 @@ async def update_grammar_category(
     Args:
         language_code: Target language code
         category: Category name (phonology, morphology, syntax, semantics, discourse)
-        translation_type: Required ('human' or 'ai')
         content: Fields to update (description, subcategories, notes, examples)
 
     Returns success status and timestamp.
     """
     db = await get_db()
-    return await _update_grammar_category(db, language_code, category, translation_type, content)
+    return await _update_grammar_category(db, language_code, category, content)
+
+
+# =============================================================================
+# Word Index Tools
+# =============================================================================
+
+
+@mcp.tool()
+async def get_word_index(
+    language_code: str,
+    word: str,
+    include_occurrences: bool = True,
+    max_occurrences: int = 50,
+) -> dict[str, Any]:
+    """
+    Look up a word in the word index.
+
+    Args:
+        language_code: Language code (e.g., 'bughotu')
+        word: Word to look up (case-insensitive)
+        include_occurrences: Whether to include occurrence details (default True)
+        max_occurrences: Max occurrences to return (default 50)
+
+    Returns word statistics: total_count, book_count, chapter_count,
+    in_dictionary flag, first_seen location, and occurrence details.
+    """
+    db = await get_db()
+    return await _get_word_index(
+        db, language_code, word, include_occurrences, max_occurrences
+    )
+
+
+@mcp.tool()
+async def get_words_not_in_dictionary(
+    language_code: str,
+    min_frequency: int = 3,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """
+    Find words appearing frequently in the corpus but missing from the dictionary.
+
+    Args:
+        language_code: Language code
+        min_frequency: Minimum occurrence count to include (default 3)
+        limit: Maximum results to return (default 100)
+
+    Returns list of words sorted by frequency (descending), with counts.
+    Useful for prioritizing dictionary work.
+    """
+    db = await get_db()
+    return await _get_words_not_in_dictionary(db, language_code, min_frequency, limit)
+
+
+@mcp.tool()
+async def get_word_frequency_list(
+    language_code: str,
+    top_n: int = 500,
+) -> dict[str, Any]:
+    """
+    Get the top N most frequent words in the corpus.
+
+    Args:
+        language_code: Language code
+        top_n: Number of words to return (default 500)
+
+    Returns list of words sorted by frequency (descending) with counts
+    and in_dictionary status.
+    """
+    db = await get_db()
+    return await _get_word_frequency_list(db, language_code, top_n)
+
+
+# =============================================================================
+# Memories Tools
+# =============================================================================
+
+
+@mcp.tool()
+async def list_language_notes(
+    language_code: str,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """
+    List all notes for a language, sorted by most recently modified.
+
+    Args:
+        language_code: Language code (e.g., 'heb', 'bughotu')
+        limit: Max notes to return (default 50, max 100)
+
+    Returns notes with id, text, created_at, updated_at, plus count and total.
+    """
+    db = await get_db()
+    return await _list_language_notes(db, language_code, limit)
+
+
+@mcp.tool()
+async def search_language_notes(
+    language_code: str,
+    search_term: str,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """
+    Search notes for a language by phrase (case-insensitive substring match).
+
+    Args:
+        language_code: Language code (e.g., 'heb', 'bughotu')
+        search_term: Phrase to search for (empty string returns all notes)
+        limit: Max notes to return (default 50, max 100)
+
+    Returns matching notes sorted by most recently modified.
+    """
+    db = await get_db()
+    return await _search_language_notes(db, language_code, search_term, limit)
+
+
+@mcp.tool()
+async def list_correction_log(
+    language_code: str,
+    content_type: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> dict[str, Any]:
+    """
+    List correction log entries for a language with optional filtering and pagination.
+
+    Args:
+        language_code: Language code (e.g., 'heb', 'bughotu')
+        content_type: Optional filter (bible_verse | dictionary_entry | grammar_category)
+        page: Page number, 1-indexed (default 1)
+        page_size: Entries per page (default 50, max 100)
+
+    Returns entries sorted by created_at DESC with pagination metadata.
+    """
+    db = await get_db()
+    return await _list_correction_log(db, language_code, content_type, page, page_size)
+
+
+@mcp.tool()
+async def search_correction_log(
+    language_code: str,
+    search_term: str,
+    content_type: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """
+    Search correction log entries across original_text, what_was_wrong, and correction fields.
+
+    Args:
+        language_code: Language code (e.g., 'heb', 'bughotu')
+        search_term: Phrase to search across all text fields (empty string returns all)
+        content_type: Optional filter (bible_verse | dictionary_entry | grammar_category)
+        limit: Max entries to return (default 50, max 100)
+
+    Returns matching entries sorted by created_at DESC.
+    """
+    db = await get_db()
+    return await _search_correction_log(db, language_code, search_term, content_type, limit)
 
 
 # =============================================================================

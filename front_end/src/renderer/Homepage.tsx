@@ -13,10 +13,19 @@ import {
 } from '@mui/material';
 import { motion } from 'framer-motion';
 import { fetchLanguages, Language } from './api';
-import { TypewriterText } from './TypewriterText';
 import { NewProjectDialog } from '../components/NewProjectDialog';
+import { BaseLanguageDialog } from '../components/BaseLanguageDialog';
 import { LanguageProject } from '../components/LanguageProject';
 import { LanguageProject as LanguageProjectType } from './types/LanguageProject';
+import { useChat } from './contexts/ChatContext';
+import { TOPBAR_HEIGHT } from './constants';
+
+// Verification progress breakdown by testament
+interface VerificationProgress {
+  old_testament: number;  // 0-100 percentage
+  new_testament: number;  // 0-100 percentage
+  total: number;          // 0-100 percentage
+}
 
 // Define the Project interface.
 // Maps language data from the API to a project with verification progress.
@@ -26,7 +35,7 @@ interface Project {
   languageCode: string;
   totalVerses: number;
   verifiedCount: number;
-  verificationProgress: number;  // 0-100 percentage
+  verificationProgress: VerificationProgress;
   isBaseLanguage: boolean;
 }
 
@@ -39,40 +48,62 @@ export function Homepage() {
   const [loading, setLoading] = useState(true); // Loading state for API call
   const [error, setError] = useState<string | null>(null); // Error state for API failure
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
+  const [baseLanguageDialogOpen, setBaseLanguageDialogOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<LanguageProjectType | null>(null);
+  const [hasAutoResumed, setHasAutoResumed] = useState(false);
+  const { setAppContext } = useChat();
+
+  const loadAndSetProjects = async () => {
+    const languages = await fetchLanguages();
+    const translationLanguages = languages.filter((lang: Language) => !lang.is_base_language);
+    const mappedProjects: Project[] = translationLanguages.map((lang: Language) => ({
+      id: lang.language_code,
+      name: lang.language_name,
+      languageCode: lang.language_code,
+      totalVerses: lang.total_verses,
+      verifiedCount: lang.verified_count,
+      verificationProgress: lang.verification_progress,
+      isBaseLanguage: lang.is_base_language,
+    }));
+    setProjects(mappedProjects);
+  };
 
   useEffect(() => {
-    /**
-     * loadLanguages asynchronously fetches languages using the API module.
-     * It then maps the returned languages to our Project interface,
-     * using the index as a simple unique id.
-     */
-    const loadLanguages = async () => {
+    const loadInitial = async () => {
       try {
-        const languages = await fetchLanguages();
-        // Filter out base language (English) - it's not a translation project
-        const translationLanguages = languages.filter((lang: Language) => !lang.is_base_language);
-        const mappedProjects: Project[] = translationLanguages.map((lang: Language) => ({
-          id: lang.language_code,
-          name: lang.language_name,
-          languageCode: lang.language_code,
-          totalVerses: lang.total_verses,
-          verifiedCount: lang.verified_count,
-          verificationProgress: lang.verification_progress,
-          isBaseLanguage: lang.is_base_language,
-        }));
-        setProjects(mappedProjects);
+        await loadAndSetProjects();
       } catch (err) {
-        // If fetch fails, update error state.
         setError('Failed to load languages. Please check if the backend is running.');
       } finally {
-        // Always stop the loading spinner, irrespective of success or failure.
         setLoading(false);
       }
     };
 
-    loadLanguages();
+    loadInitial();
   }, []);
+
+  // Auto-resume last selected language
+  useEffect(() => {
+    if (loading || projects.length === 0 || hasAutoResumed) return;
+
+    try {
+      const lastCode = localStorage.getItem('lastLanguageCode');
+      if (!lastCode) {
+        setHasAutoResumed(true);
+        return;
+      }
+
+      const project = projects.find(p => p.languageCode === lastCode);
+      if (project) {
+        console.log('[Homepage] Auto-resuming language:', lastCode);
+        handleSelectProject(project);
+      }
+      setHasAutoResumed(true);
+    } catch (err) {
+      console.warn('Failed to auto-resume language:', err);
+      setHasAutoResumed(true);
+    }
+  }, [loading, projects, hasAutoResumed]);
 
   /**
    * handleCreateNew - Opens the new project dialog.
@@ -82,27 +113,18 @@ export function Homepage() {
     setNewProjectDialogOpen(true);
   };
 
+  const handleChooseBaseLanguage = () => {
+    setBaseLanguageDialogOpen(true);
+  };
+
   /**
    * handleNewProjectSuccess - Called when a new project is successfully created.
    * Refreshes the language list.
    */
   const handleNewProjectSuccess = async (languageCode: string) => {
     console.log(`New project created: ${languageCode}`);
-    // Refresh the languages list
     try {
-      const languages = await fetchLanguages();
-      // Filter out base language (English) - it's not a translation project
-      const translationLanguages = languages.filter((lang: Language) => !lang.is_base_language);
-      const mappedProjects: Project[] = translationLanguages.map((lang: Language) => ({
-        id: lang.language_code,
-        name: lang.language_name,
-        languageCode: lang.language_code,
-        totalVerses: lang.total_verses,
-        verifiedCount: lang.verified_count,
-        verificationProgress: lang.verification_progress,
-        isBaseLanguage: lang.is_base_language,
-      }));
-      setProjects(mappedProjects);
+      await loadAndSetProjects();
     } catch (err) {
       console.error('Failed to refresh languages after project creation');
     }
@@ -115,6 +137,13 @@ export function Homepage() {
    */
   const handleSelectProject = (project: Project) => {
     console.log('Selected project:', project);
+
+    // Persist to localStorage for auto-resume
+    try {
+      localStorage.setItem('lastLanguageCode', project.languageCode);
+    } catch (err) {
+      console.warn('Failed to save last language:', err);
+    }
 
     // Transform flat Project to nested LanguageProjectType
     const languageProject: LanguageProjectType = {
@@ -130,12 +159,10 @@ export function Homepage() {
         humanGrammar: null,
         nlmGrammar: null
       },
-      lastAccessed: new Date(),
       progress: {
-        humanBibleCompletion: project.verificationProgress,
-        nlmBibleCompletion: 0,
-        dictionaryCompletion: 0,
-        grammarCompletion: 0
+        oldTestamentCompletion: project.verificationProgress.old_testament,
+        newTestamentCompletion: project.verificationProgress.new_testament,
+        overallCompletion: project.verificationProgress.total
       }
     };
 
@@ -147,6 +174,12 @@ export function Homepage() {
    */
   const handleBackFromProject = () => {
     setSelectedProject(null);
+    setAppContext({
+      languageCode: null,
+      bookCode: null,
+      chapter: null,
+      view: null,
+    });
   };
 
   // If a project is selected, show the LanguageProject view
@@ -164,7 +197,8 @@ export function Homepage() {
       sx={{
         minHeight: '100vh',
         background: 'linear-gradient(135deg, #000000, #1A1A1A)',
-        py: 8,
+        pt: `${TOPBAR_HEIGHT + 16}px`,
+        pb: 8,
         px: 4,
       }}
     >
@@ -173,15 +207,7 @@ export function Homepage() {
           <Typography variant="h1" align="center" gutterBottom>
             New Language Model
           </Typography>
-          <Typography
-            variant="subtitle1"
-            align="center"
-            color="text.secondary"
-            sx={{ mb: 6, fontSize: '2rem' }}
-          >
-            <TypewriterText text="To whom much has been given, much is required." speed={25} />
-          </Typography>
-        </motion.div>
+         </motion.div>
 
         {loading ? (
           // Show a spinner while loading data
@@ -194,11 +220,11 @@ export function Homepage() {
             {error}
           </Typography>
         ) : (
-          <Grid container spacing={4}>
+          <Grid container spacing={4} sx={{ minHeight: '60vh', alignItems: 'center' }}>
             <Grid item xs={12} md={6}>
               <Paper elevation={3} sx={{ p: 4, borderRadius: '16px' }}>
                 <Typography variant="h2" gutterBottom>
-                  Continue Journey...
+                  Continue...
                 </Typography>
                 {projects.length > 0 ? (
                   <List>
@@ -224,12 +250,12 @@ export function Homepage() {
                                 {project.name}
                               </Typography>
                               <Typography sx={{ fontSize: '1rem', color: 'text.secondary' }}>
-                                {project.verificationProgress.toFixed(1)}% verified
+                                {project.verificationProgress.total.toFixed(1)}% verified
                               </Typography>
                             </Box>
                             <LinearProgress
                               variant="determinate"
-                              value={project.verificationProgress}
+                              value={project.verificationProgress.total}
                               sx={{
                                 width: '100%',
                                 height: 8,
@@ -251,22 +277,33 @@ export function Homepage() {
               </Paper>
             </Grid>
 
-            <Grid item xs={12} md={6} display="flex" alignItems="center" justifyContent="center">
-              <Paper elevation={3} sx={{ p: 4, borderRadius: '16px', textAlign: 'center' }}>
+            <Grid item xs={12} md={6}>
+              <Paper elevation={3} sx={{ p: 4, borderRadius: '16px' }}>
                 <Typography variant="h2" gutterBottom>
-                  Start Fresh
+                  Create New...
                 </Typography>
-                <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.95 }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <Button
-                    variant="contained"
+                    variant="outlined"
                     color="primary"
                     size="large"
+                    fullWidth
                     onClick={handleCreateNew}
-                    sx={{ px: 6, py: 2 }}
+                    sx={{ py: 3, fontSize: '1.5rem' }}
                   >
                     Create New Project
                   </Button>
-                </motion.div>
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    size="large"
+                    fullWidth
+                    onClick={handleChooseBaseLanguage}
+                    sx={{ py: 3, fontSize: '1.5rem' }}
+                  >
+                    Choose Base Languages
+                  </Button>
+                </Box>
               </Paper>
             </Grid>
           </Grid>
@@ -277,6 +314,10 @@ export function Homepage() {
         open={newProjectDialogOpen}
         onClose={() => setNewProjectDialogOpen(false)}
         onSuccess={handleNewProjectSuccess}
+      />
+      <BaseLanguageDialog
+        open={baseLanguageDialogOpen}
+        onClose={() => setBaseLanguageDialogOpen(false)}
       />
     </Box>
   );

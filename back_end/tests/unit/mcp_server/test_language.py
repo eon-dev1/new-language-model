@@ -37,16 +37,16 @@ class TestListLanguages:
 
     @pytest.mark.asyncio
     async def test_list_languages_includes_progress(self, mock_mcp_db):
-        """Languages include translation progress stats"""
+        """Languages include translation stats"""
         from mcp_server.tools.language import list_languages
 
         result = await list_languages(mock_mcp_db)
 
-        # Find Hebrew (has both human and ai progress)
+        # Find Hebrew
         heb = next(l for l in result["languages"] if l["code"] == "heb")
-        assert "progress" in heb
-        assert "human" in heb["progress"]
-        assert "ai" in heb["progress"]
+        assert "translation_stats" in heb
+        assert "books_started" in heb["translation_stats"]
+        assert "verses_translated" in heb["translation_stats"]
 
     @pytest.mark.asyncio
     async def test_list_languages_empty_db(self, mock_mcp_db):
@@ -62,16 +62,15 @@ class TestListLanguages:
         assert result["count"] == 0
 
     @pytest.mark.asyncio
-    async def test_list_languages_english_no_ai_progress(self, mock_mcp_db):
-        """English only has human progress (no AI)"""
+    async def test_list_languages_english_has_translation_stats(self, mock_mcp_db):
+        """English has translation stats"""
         from mcp_server.tools.language import list_languages
 
         result = await list_languages(mock_mcp_db)
 
         english = next(l for l in result["languages"] if l["code"] == "english")
-        assert "human" in english["progress"]
-        # AI progress should be absent or null for English
-        assert english["progress"].get("ai") is None
+        assert "translation_stats" in english
+        assert "books_started" in english["translation_stats"]
 
 
 class TestGetLanguageInfo:
@@ -99,15 +98,13 @@ class TestGetLanguageInfo:
         assert result["error"]["code"] == "not_found"
 
     @pytest.mark.asyncio
-    async def test_get_language_info_includes_translation_levels(self, mock_mcp_db):
-        """Returns translation progress for each level"""
+    async def test_get_language_info_includes_translation_stats(self, mock_mcp_db):
+        """Returns translation stats"""
         from mcp_server.tools.language import get_language_info
 
         result = await get_language_info(mock_mcp_db, "heb")
 
-        assert "translation_levels" in result
-        assert "human" in result["translation_levels"]
-        assert "books_started" in result["translation_levels"]["human"]
+        assert "translation_stats" in result
 
     @pytest.mark.asyncio
     async def test_get_language_info_case_insensitive(self, mock_mcp_db):

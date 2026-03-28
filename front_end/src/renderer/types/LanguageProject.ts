@@ -44,8 +44,12 @@ export interface DictionaryEntryVersion {
 
 export interface MergedDictionaryEntry {
   word: string;
-  human?: DictionaryEntryVersion;
-  ai?: DictionaryEntryVersion;
+  definition?: string;
+  partOfSpeech?: string;
+  examples?: string[];
+  humanVerified?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface DictionaryEntriesResponse {
@@ -88,8 +92,12 @@ export interface GrammarCategoryVersion {
 
 export interface MergedGrammarCategory {
   name: string;
-  human?: GrammarCategoryVersion;
-  ai?: GrammarCategoryVersion;
+  description?: string;
+  subcategories?: SubcategoryItem[];
+  notes?: string[];
+  examples?: ExampleItem[];
+  humanVerified?: boolean;
+  updatedAt?: string;
 }
 
 export interface GrammarCategoriesResponse {
@@ -135,32 +143,24 @@ export interface GrammarSection {
 
 export interface ProjectResources {
   bible: BibleResource | null;
-  // Unified resources (new)
   dictionary: { available: boolean } | null;
   grammar: { available: boolean } | null;
-  // Legacy separate resources (kept for backward compatibility)
-  humanDictionary?: Dictionary | null;
-  nlmDictionary?: Dictionary | null;
-  humanGrammar?: Grammar | null;
-  nlmGrammar?: Grammar | null;
 }
 
 export interface LanguageProject {
   language: Language;
   resources: ProjectResources;
-  lastAccessed: Date;
   progress: ProjectProgress;
 }
 
 export interface ProjectProgress {
-  humanBibleCompletion: number; // 0-100
-  nlmBibleCompletion: number; // 0-100
-  dictionaryCompletion: number; // 0-100
-  grammarCompletion: number; // 0-100
+  oldTestamentCompletion: number;  // 0-100
+  newTestamentCompletion: number;  // 0-100
+  overallCompletion: number;       // 0-100
 }
 
 // Simplified resource type (unified views)
-export type ResourceType = 'bible' | 'dictionary' | 'grammar';
+export type ResourceType = 'bible' | 'dictionary' | 'memories';
 
 export interface NavigationState {
   currentView: 'home' | 'project';

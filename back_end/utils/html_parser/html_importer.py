@@ -29,9 +29,9 @@ async def import_html_to_mongodb(
     filepath: Path | str,
     language_code: str = "english",
     language_name: str = None,
-    translation_type: str = "human",
     batch_size: int = 500,
-    connector=None
+    connector=None,
+    human_verified: bool = False
 ) -> ImportResult:
     """
     Import a single HTML chapter file into MongoDB.
@@ -40,7 +40,6 @@ async def import_html_to_mongodb(
         filepath: Path to HTML file
         language_code: Target language code (default: "english")
         language_name: Display name for the language (optional)
-        translation_type: "human" or "ai" (default: "human")
         batch_size: Number of documents per batch operation
         connector: Optional MongoDBConnector instance (creates new if None)
 
@@ -82,7 +81,7 @@ async def import_html_to_mongodb(
             operations = []
 
             for verse in batch:
-                doc = _verse_to_document(verse, language_code, translation_type, language_name)
+                doc = _verse_to_document(verse, language_code, language_name, human_verified=human_verified)
 
                 # Use upsert to handle existing documents
                 filter_doc = {
@@ -90,7 +89,6 @@ async def import_html_to_mongodb(
                     "book_code": verse.book_code,
                     "chapter": verse.chapter,
                     "verse": verse.verse,
-                    "translation_type": translation_type
                 }
 
                 # Build update operation
@@ -136,9 +134,9 @@ async def import_html_directory_to_mongodb(
     dirpath: Path | str,
     language_code: str = "english",
     language_name: str = None,
-    translation_type: str = "human",
     batch_size: int = 500,
-    pattern: str = "*.htm"
+    pattern: str = "*.htm",
+    human_verified: bool = False
 ) -> ImportResult:
     """
     Import all HTML Bible files from a directory into MongoDB.
@@ -147,7 +145,6 @@ async def import_html_directory_to_mongodb(
         dirpath: Path to directory containing HTML files
         language_code: Target language code (default: "english")
         language_name: Display name for the language (optional)
-        translation_type: "human" or "ai" (default: "human")
         batch_size: Number of documents per batch operation
         pattern: Glob pattern for HTML files (default: "*.htm")
 
@@ -196,9 +193,9 @@ async def import_html_directory_to_mongodb(
                 html_file,
                 language_code=language_code,
                 language_name=language_name,
-                translation_type=translation_type,
                 batch_size=batch_size,
-                connector=connector
+                connector=connector,
+                human_verified=human_verified
             )
 
             result.verses_imported += file_result.verses_imported
@@ -229,33 +226,29 @@ if __name__ == "__main__":
 
     async def main():
         if len(sys.argv) < 2:
-            print("Usage: python html_importer.py <html_file_or_directory> [language_code] [translation_type]")
+            print("Usage: python html_importer.py <html_file_or_directory> [language_code]")
             print("\nExamples:")
             print("  python html_importer.py data/bibles/bgt_html/")
-            print("  python html_importer.py data/bibles/bgt_html/MAT01.htm bughotu human")
+            print("  python html_importer.py data/bibles/bgt_html/MAT01.htm bughotu")
             sys.exit(1)
 
         path = Path(sys.argv[1])
         language_code = sys.argv[2] if len(sys.argv) > 2 else "english"
-        translation_type = sys.argv[3] if len(sys.argv) > 3 else "human"
 
         print(f"Importing HTML Bible data to MongoDB")
         print(f"  Path: {path}")
         print(f"  Language: {language_code}")
-        print(f"  Translation Type: {translation_type}")
         print("-" * 50)
 
         if path.is_file():
             result = await import_html_to_mongodb(
                 path,
                 language_code=language_code,
-                translation_type=translation_type
             )
         elif path.is_dir():
             result = await import_html_directory_to_mongodb(
                 path,
                 language_code=language_code,
-                translation_type=translation_type
             )
         else:
             print(f"Path not found: {path}")

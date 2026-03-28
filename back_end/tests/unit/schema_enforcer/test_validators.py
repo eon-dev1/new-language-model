@@ -80,24 +80,6 @@ class TestBookCodeValidation:
         assert len(validate_book_code("1 chronicles")) > 0  # Space
 
 
-class TestTranslationTypeValidation:
-    """Tests for validate_translation_type validator"""
-
-    def test_validate_translation_type_valid(self):
-        """Accepts 'human' and 'ai'"""
-        from utils.schema_enforcer.validators import validate_translation_type
-
-        assert validate_translation_type("human") == []
-        assert validate_translation_type("ai") == []
-
-    def test_validate_translation_type_invalid(self):
-        """Rejects other values"""
-        from utils.schema_enforcer.validators import validate_translation_type
-
-        assert len(validate_translation_type("machine")) > 0
-        assert len(validate_translation_type("")) > 0
-        assert len(validate_translation_type("Human")) > 0  # Case sensitive
-
 
 class TestBookOrderValidation:
     """Tests for validate_book_order validator"""

@@ -20,7 +20,7 @@ pip install "mcp[cli]" httpx
 
 **Requirements:**
 - Python 3.10+
-- MCP SDK version 1.2.0 or higher
+- MCP SDK version 1.25.0 or higher
 
 ---
 
@@ -366,7 +366,7 @@ claude mcp remove mongodb-tools
 
 ```python
 from mcp.server.fastmcp import FastMCP
-from fastmcp.exceptions import ToolError
+from mcp.server.fastmcp.exceptions import ToolError
 
 mcp = FastMCP("error-handling-server")
 
@@ -390,7 +390,7 @@ async def query_collection(collection: str) -> list[dict]:
 
 ```python
 from mcp.server.fastmcp import FastMCP, Context
-from fastmcp.exceptions import ToolError
+from mcp.server.fastmcp.exceptions import ToolError
 import logging
 
 # Configure logging to stderr (IMPORTANT: never log to stdout)
@@ -404,7 +404,7 @@ async def find_documents(
     collection: str,
     query: dict = {},
     limit: int = 10,
-    ctx: Context = None
+    ctx: Context
 ) -> list[dict]:
     """Find documents with comprehensive error handling."""
 
@@ -416,8 +416,7 @@ async def find_documents(
         raise ToolError("Limit must be between 1 and 1000")
 
     try:
-        if ctx:
-            await ctx.info(f"Querying collection: {collection}")
+        await ctx.info(f"Querying collection: {collection}")
 
         cursor = db[collection].find(query).limit(limit)
         documents = await cursor.to_list(length=limit)

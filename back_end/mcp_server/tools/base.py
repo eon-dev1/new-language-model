@@ -4,7 +4,7 @@ Base utilities for MCP server tools.
 Provides:
 - ToolError exception for structured error responses
 - Response helpers (success_response, error_response)
-- Common validators (validate_language, validate_translation_type, validate_book_code)
+- Common validators (validate_language, validate_book_code)
 - File output utilities (validate_filename, save_result_to_file)
 """
 
@@ -14,10 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from utils.schema_enforcer.schema_definition import (
-    VALID_TRANSLATION_TYPES,
-    BOOK_CODE_PATTERN,
-)
+from utils.schema_enforcer.schema_definition import BOOK_CODE_PATTERN
 
 
 class ToolError(Exception):
@@ -101,27 +98,6 @@ async def validate_language(db, language_code: str) -> dict[str, Any]:
         )
 
     return doc
-
-
-def validate_translation_type(translation_type: str | None) -> None:
-    """
-    Validate translation type parameter.
-
-    Args:
-        translation_type: "human", "ai", or None (meaning both)
-
-    Raises:
-        ToolError: If translation_type is invalid (code="invalid_input")
-    """
-    if translation_type is None:
-        return  # None means "both types", which is valid
-
-    if translation_type not in VALID_TRANSLATION_TYPES:
-        raise ToolError(
-            "invalid_input",
-            f"Invalid translation_type '{translation_type}'. Must be one of: {', '.join(sorted(VALID_TRANSLATION_TYPES))}",
-            {"translation_type": translation_type, "valid_types": list(VALID_TRANSLATION_TYPES)},
-        )
 
 
 def validate_book_code(book_code: str) -> str:

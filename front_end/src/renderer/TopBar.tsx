@@ -6,7 +6,9 @@ import MenuIcon       from '@mui/icons-material/Menu';
 import MinimizeIcon   from '@mui/icons-material/Minimize';
 import CropSquareIcon from '@mui/icons-material/CropSquare';
 import CloseIcon      from '@mui/icons-material/Close';
+import ChatIcon       from '@mui/icons-material/ChatBubbleOutline';
 import { SettingsDialog } from './components/SettingsDialog';
+import { useChat } from './contexts/ChatContext';
 
 /**
  * TopBar - Static application menu bar with window controls.
@@ -22,6 +24,7 @@ export const TopBar: React.FC = () => {
   const [anchor, setAnchor] = React.useState<null | HTMLElement>(null);
   const [viewSubmenu, setViewSubmenu] = React.useState<null | HTMLElement>(null);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const { toggleChat, isOpen: chatOpen } = useChat();
 
   return (
     // The AppBar is marked as draggable so the window can be moved by dragging this area.
@@ -71,6 +74,19 @@ export const TopBar: React.FC = () => {
           }}>Settings</MenuItem>
         </Menu>
         <Box sx={{ flexGrow: 1 }} />
+        {/* Chat toggle */}
+        <IconButton
+          color="inherit"
+          onClick={toggleChat}
+          size="small"
+          sx={{
+            '-webkit-app-region': 'no-drag',
+            mr: 1,
+            opacity: chatOpen ? 1 : 0.6,
+          }}
+        >
+          <ChatIcon fontSize="small" />
+        </IconButton>
         {/* Window control buttons are also excluded from dragging */}
         <IconButton
           color="inherit"

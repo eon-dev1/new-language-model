@@ -19,18 +19,12 @@ class TestServerSetup:
         assert mcp is not None
         assert mcp.name == "nlm-database"
 
-    def test_server_has_correct_name(self):
-        """Server is named 'nlm-database'"""
-        from mcp_server.server import mcp
-
-        assert mcp.name == "nlm-database"
-
 
 class TestToolRegistration:
     """Tests for tool registration"""
 
     def test_all_tools_registered(self):
-        """All 13 tools are registered"""
+        """All 20 tools are registered"""
         from mcp_server.server import mcp
 
         # Get registered tools
@@ -50,6 +44,13 @@ class TestToolRegistration:
             "list_grammar_categories",
             "get_grammar_category",
             "update_grammar_category",
+            "get_word_index",
+            "get_words_not_in_dictionary",
+            "get_word_frequency_list",
+            "list_language_notes",
+            "search_language_notes",
+            "list_correction_log",
+            "search_correction_log",
         }
 
         registered_names = set(tools.keys())

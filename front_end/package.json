@@ -1,9 +1,13 @@
 {
   "name": "new-language-model",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "description": "New Language Model",
   "main": "dist/main/main.js",
   "author": "Eon Dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eon-dev1/new-language-model"
+  },
   "license": "MIT",
   "scripts": {
     "dev:renderer": "vite",
@@ -12,14 +16,15 @@
     "build:main": "webpack --mode production",
     "build": "npm run build:main && npm run build:renderer",
     "start": "electron dist/main/main.js",
-    "dev": "concurrently \"npm run dev:main\" \"npm run dev:renderer\" \"wait-on dist/main/main.js && electron dist/main/main.js\"",
+    "prepare:mongo": "node scripts/download-mongo-binaries.js",
+    "predev": "node scripts/download-mongo-binaries.js",
+    "dev": "concurrently --names \"main,renderer,electron\" \"npm run dev:main\" \"npm run dev:renderer\" \"wait-on dist/main/main.js && electron dist/main/main.js\"",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write .",
-    "test": "vitest",
-    "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test": "vitest run && vitest run --config vitest.renderer.config.ts",
+    "test:main": "vitest --config vitest.config.ts",
     "test:renderer": "vitest --config vitest.renderer.config.ts",
-    "test:renderer:run": "vitest run --config vitest.renderer.config.ts"
+    "test:coverage": "vitest run --coverage && vitest run --config vitest.renderer.config.ts --coverage"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

@@ -13,6 +13,8 @@ import logging
 
 from db_connector.connection import MongoDBConnector
 from utils.html_parser.html_importer import import_html_directory_to_mongodb
+from utils.usfm_parser.usfm_importer import sync_bible_books_from_texts
+from utils.word_index.builder import build_word_index
 from constants import Collection
 from .dependencies import get_db, api_error
 
@@ -24,7 +26,7 @@ class ImportHtmlBibleRequest(BaseModel):
     language_code: str
     language_name: str
     html_directory: str
-    translation_type: str = "human"
+    human_verified: bool = False
 
 
 class ImportHtmlBibleResponse(BaseModel):
@@ -51,7 +53,7 @@ async def import_html_bible(
     Skips chapter 00 files (introductions).
     Handles both fresh imports and re-imports (upsert behavior).
     """
-    dirpath = Path(request.html_directory)
+    dirpath = Path(request.html_directory).resolve()
 
     if not dirpath.exists():
         raise HTTPException(
@@ -72,7 +74,7 @@ async def import_html_bible(
             dirpath=dirpath,
             language_code=request.language_code,
             language_name=request.language_name,
-            translation_type=request.translation_type
+            human_verified=request.human_verified,
         )
 
         if result.errors:
@@ -90,13 +92,18 @@ async def import_html_bible(
             message = f"Imported {result.verses_imported} verses from {result.books_processed} chapters"
 
         # Ensure language document exists in languages collection
-        # This makes the imported project visible in "Continue Journey"
         database = db.get_database()
         languages_collection = database[Collection.LANGUAGES]
+        bible_texts = database[Collection.BIBLE_TEXTS]
         existing_language = await languages_collection.find_one({"language_code": request.language_code})
 
         total_verses = result.verses_imported + result.verses_updated
-        translation_key = request.translation_type  # "human" or "ai"
+
+        # Count human-verified verses after import
+        verses_verified = await bible_texts.count_documents({
+            "language_code": request.language_code,
+            "human_verified": True
+        })
 
         if not existing_language:
             language_doc = {
@@ -107,42 +114,49 @@ async def import_html_bible(
                 "status": "active",
                 "bible_books_count": result.books_processed,
                 "total_verses": total_verses,
-                "translation_levels": {
-                    "human": {
-                        "books_started": result.books_processed if translation_key == "human" else 0,
-                        "books_completed": 0,
-                        "verses_translated": total_verses if translation_key == "human" else 0,
-                        "last_updated": datetime.utcnow() if translation_key == "human" else None
-                    },
-                    "ai": {
-                        "books_started": result.books_processed if translation_key == "ai" else 0,
-                        "books_completed": 0,
-                        "verses_translated": total_verses if translation_key == "ai" else 0,
-                        "last_updated": datetime.utcnow() if translation_key == "ai" else None,
-                        "model_version": "nlm-v1.0"
-                    }
+                "translation_stats": {
+                    "books_started": result.books_processed,
+                    "books_completed": 0,
+                    "verses_translated": total_verses,
+                    "verses_verified": verses_verified,
+                    "last_updated": datetime.utcnow()
                 },
                 "metadata": {
                     "creator": "import_html_endpoint",
                     "version": "1.0",
-                    "description": f"Imported from HTML files",
-                    "dual_level_support": True
+                    "description": "Imported from HTML files",
                 }
             }
             await languages_collection.insert_one(language_doc)
             logger.info(f"Created language document for {request.language_name}")
         else:
-            # Update existing language with new import stats
             await languages_collection.update_one(
                 {"language_code": request.language_code},
                 {"$set": {
                     "updated_at": datetime.utcnow(),
-                    f"translation_levels.{translation_key}.verses_translated": total_verses,
-                    f"translation_levels.{translation_key}.books_started": result.books_processed,
-                    f"translation_levels.{translation_key}.last_updated": datetime.utcnow()
+                    "translation_stats.verses_translated": total_verses,
+                    "translation_stats.books_started": result.books_processed,
+                    "translation_stats.verses_verified": verses_verified,
+                    "translation_stats.last_updated": datetime.utcnow()
                 }}
             )
             logger.info(f"Updated language document for {request.language_name}")
+
+        # Rebuild word index after import
+        try:
+            idx = await build_word_index(db, request.language_code)
+            logger.info(f"Word index rebuilt: {idx['words_indexed']} words in {idx['duration_ms']}ms")
+        except Exception as idx_err:
+            logger.warning(f"Word index rebuild failed (non-fatal): {idx_err}")
+
+        # Sync bible_books metadata from imported bible_texts
+        try:
+            synced = await sync_bible_books_from_texts(
+                request.language_code, db
+            )
+            logger.info(f"bible_books sync: {synced} books")
+        except Exception as sync_err:
+            logger.warning(f"bible_books sync failed (non-fatal): {sync_err}")
 
         return ImportHtmlBibleResponse(
             success=result.success,

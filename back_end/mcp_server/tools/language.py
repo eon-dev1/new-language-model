@@ -25,7 +25,7 @@ async def list_languages(db) -> dict[str, Any]:
 
     Returns:
         {
-            "languages": [{code, name, status, is_base_language, progress}],
+            "languages": [{code, name, status, is_base_language, translation_stats}],
             "count": int
         }
     """
@@ -35,26 +35,13 @@ async def list_languages(db) -> dict[str, Any]:
 
     languages = []
     for doc in docs:
-        # Build progress dict from translation_levels
-        progress = {}
-        translation_levels = doc.get("translation_levels", {})
-
-        if "human" in translation_levels:
-            progress["human"] = translation_levels["human"]
-
-        # AI progress only for non-English languages
-        if "ai" in translation_levels and translation_levels["ai"] is not None:
-            progress["ai"] = translation_levels["ai"]
-        else:
-            progress["ai"] = None
-
         languages.append(
             {
                 "code": doc["language_code"],
                 "name": doc["language_name"],
                 "status": doc.get("status", "active"),
                 "is_base_language": doc.get("is_base_language", False),
-                "progress": progress,
+                "translation_stats": doc.get("translation_stats", {}),
             }
         )
 

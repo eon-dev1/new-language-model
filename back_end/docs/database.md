@@ -26,6 +26,10 @@ The NLM platform uses MongoDB as its primary database, storing Bible translation
 | `base_structure_bible` | Canonical Bible structure (31,102 verses) | Active (generators only) |
 | `dictionaries` | Word entries with definitions | Active (empty) |
 | `grammar_systems` | Grammar rules organized by category | Active (empty) |
+| `word_index` | Word frequency and dictionary gap tracking | Active |
+| `correction_log` | Log of text corrections | Active |
+| `language_notes` | Notes attached to languages | Active |
+| `chat_conversations` | AI chat conversation history | Active |
 
 ### Collection Purposes
 
@@ -39,7 +43,7 @@ The NLM platform uses MongoDB as its primary database, storing Bible translation
 
 ## Collection: languages
 
-Stores metadata for each language in the system, including translation progress tracking for both human and AI versions.
+Stores metadata for each language in the system, including translation progress tracking.
 
 > **See**: `utils/schema_enforcer/schema_definition.py` for authoritative field definitions
 
@@ -64,26 +68,17 @@ Stores metadata for each language in the system, including translation progress 
   "status": String,                // "active" | "inactive"
   "bible_books_count": Number,     // Always 66
   "total_verses": Number,          // 31,102
-  "translation_levels": {
-    "human": {
-      "books_started": Number,
-      "books_completed": Number,
-      "verses_translated": Number,
-      "last_updated": ISODate | null
-    },
-    "ai": {                        // null for English
-      "books_started": Number,
-      "books_completed": Number,
-      "verses_translated": Number,
-      "last_updated": ISODate | null,
-      "model_version": String      // e.g., "nlm-v1.0"
-    }
+  "translation_stats": {
+    "books_started": Number,
+    "books_completed": Number,
+    "verses_translated": Number,
+    "verses_verified": Number,     // Verses with human_verified: true
+    "last_updated": ISODate | null
   },
   "metadata": {
     "creator": String,             // "nlm_fastapi_endpoint"
     "version": String,             // "1.0"
-    "description": String,
-    "dual_level_support": Boolean  // false for English
+    "description": String
   }
 }
 ```
@@ -100,26 +95,17 @@ Stores metadata for each language in the system, including translation progress 
   "status": "active",
   "bible_books_count": 66,
   "total_verses": 31102,
-  "translation_levels": {
-    "human": {
-      "books_started": 0,
-      "books_completed": 0,
-      "verses_translated": 0,
-      "last_updated": null
-    },
-    "ai": {
-      "books_started": 0,
-      "books_completed": 0,
-      "verses_translated": 0,
-      "last_updated": null,
-      "model_version": "nlm-v1.0"
-    }
+  "translation_stats": {
+    "books_started": 0,
+    "books_completed": 0,
+    "verses_translated": 0,
+    "verses_verified": 0,
+    "last_updated": null
   },
   "metadata": {
     "creator": "nlm_fastapi_endpoint",
     "version": "1.0",
-    "description": "Biblical translation project for Kope",
-    "dual_level_support": true
+    "description": "Biblical translation project for Kope"
   }
 }
 ```
@@ -171,8 +157,7 @@ for all languages - actual translations are stored in `bible_texts`.
 ## Collection: bible_books
 
 Stores language-specific book metadata with embedded chapter information. One document per
-(language, book, translation_type) combination. This is the primary collection for book lists
-shown in the frontend.
+(language, book) combination. This is the primary collection for book lists shown in the frontend.
 
 > **See**: `utils/schema_enforcer/schema_definition.py` for authoritative field definitions
 
@@ -180,11 +165,11 @@ shown in the frontend.
 
 ```javascript
 // Unique book lookup
-{ "language_code": 1, "book_code": 1, "translation_type": 1 }
+{ "language_code": 1, "book_code": 1 }
 // unique: true, name: "book_lookup"
 
-// Language + type filtering
-{ "language_code": 1, "translation_type": 1 }
+// Language filtering
+{ "language_code": 1 }
 // name: "language_type_filter"
 ```
 
@@ -197,20 +182,18 @@ shown in the frontend.
   "language_name": String,        // e.g., "Kope", "English"
   "book_name": String,            // Localized name (e.g., "Genesis", "בראשית")
   "book_code": String,            // e.g., "genesis", "1_chronicles"
-  "translation_type": String,     // "human" | "ai"
   "total_chapters": Number,       // e.g., 50 for Genesis
   "total_verses": Number,         // e.g., 1533 for Genesis
   "chapters": [                   // Embedded chapter data
-    { "chapter": Number, "verse_count": Number }
+    { "chapter_number": Number, "verse_count": Number, "verses": [Number] }
   ],
   "created_at": ISODate,
   "updated_at": ISODate,          // Optional
-  "translation_status": String,   // "complete" | "in_progress" | "draft"
+  "translation_status": String,   // "not_started" | "imported" | "in_progress" | "complete" | "draft"
   "metadata": {
     "testament": String,          // "old" | "new"
     "canonical_order": Number,    // 1-66
-    "translator_type": String,    // "human" | "ai"
-    "ai_model": String            // Optional, for AI translations
+    "ai_model": String            // Optional
   }
 }
 ```
@@ -224,20 +207,18 @@ shown in the frontend.
   "language_name": "Kope",
   "book_name": "Genesis",
   "book_code": "genesis",
-  "translation_type": "human",
   "total_chapters": 50,
   "total_verses": 1533,
   "chapters": [
-    { "chapter": 1, "verse_count": 31 },
-    { "chapter": 2, "verse_count": 25 },
+    { "chapter_number": 1, "verse_count": 31, "verses": [1, 2, ..., 31] },
+    { "chapter_number": 2, "verse_count": 25, "verses": [1, 2, ..., 25] },
     // ... all 50 chapters
   ],
   "created_at": ISODate("2024-01-15T10:30:00.000Z"),
   "translation_status": "in_progress",
   "metadata": {
     "testament": "old",
-    "canonical_order": 1,
-    "translator_type": "human"
+    "canonical_order": 1
   }
 }
 ```
@@ -247,7 +228,7 @@ shown in the frontend.
 ## Collection: bible_texts
 
 Stores individual verses for efficient querying and search. This is the primary collection
-for verse content across all languages.
+for verse content across all languages. One document per (language, book, chapter, verse).
 
 > **See**: `utils/schema_enforcer/schema_definition.py` for authoritative field definitions
 
@@ -260,7 +241,6 @@ for verse content across all languages.
   "book_code": String,              // e.g., "genesis", "1_chronicles" (lowercase + underscores)
   "chapter": Number,
   "verse": Number,
-  "translation_type": String,       // "human" | "ai"
   "created_at": ISODate,
 
   // English verses only:
@@ -279,15 +259,15 @@ for verse content across all languages.
 
 ```javascript
 // Unique compound index for verse lookup
-{ "language_code": 1, "book_code": 1, "chapter": 1, "verse": 1, "translation_type": 1 }
+{ "language_code": 1, "book_code": 1, "chapter": 1, "verse": 1 }
 // unique: true, name: "verse_lookup"
 
-// Language + type filtering
-{ "language_code": 1, "translation_type": 1 }
+// Language filtering
+{ "language_code": 1 }
 // name: "language_type_filter"
 
-// Book + type filtering
-{ "book_code": 1, "translation_type": 1 }
+// Book filtering
+{ "book_code": 1 }
 // name: "book_type_filter"
 ```
 
@@ -299,29 +279,19 @@ db.bible_texts.findOne({
   language_code: "kope",
   book_code: "genesis",
   chapter: 1,
-  verse: 1,
-  translation_type: "human"
+  verse: 1
 })
 
 // Get all verses in a chapter
 db.bible_texts.find({
   language_code: "kope",
   book_code: "genesis",
-  chapter: 1,
-  translation_type: "human"
+  chapter: 1
 }).sort({ verse: 1 })
-
-// Get all AI translations for a book
-db.bible_texts.find({
-  language_code: "kope",
-  book_code: "genesis",
-  translation_type: "ai"
-})
 
 // Count translated verses
 db.bible_texts.countDocuments({
   language_code: "kope",
-  translation_type: "human",
   translated_text: { $ne: "" }
 })
 ```
@@ -330,16 +300,15 @@ db.bible_texts.countDocuments({
 
 ## Collection: dictionaries
 
-Stores dictionary frameworks for each language, with separate documents for human and AI versions.
-Currently empty - structure exists but no entries have been created yet.
+Stores dictionary entries for each language. One document per language with entries embedded.
 
 > **See**: `utils/schema_enforcer/schema_definition.py` for authoritative field definitions
 
 ### Indexes
 
 ```javascript
-// Unique lookup by language and type
-{ "language_code": 1, "translation_type": 1 }
+// Unique lookup by language
+{ "language_code": 1 }
 // unique: true, name: "dict_lookup"
 ```
 
@@ -350,8 +319,7 @@ Currently empty - structure exists but no entries have been created yet.
   "_id": ObjectId,
   "language_code": String,
   "language_name": String,
-  "translation_type": String,       // "human" | "ai"
-  "dictionary_name": String,        // e.g., "Kope Human Dictionary"
+  "dictionary_name": String,        // e.g., "Kope Dictionary"
   "entries": [
     {
       "word": String,               // Required
@@ -370,9 +338,7 @@ Currently empty - structure exists but no entries have been created yet.
   "metadata": {
     "description": String,
     "version": String,
-    "status": String,               // "active"
-    "generation_method": String,    // "human" | "ai"
-    "ai_model": String | null
+    "status": String                // "active"
   }
 }
 ```
@@ -401,8 +367,7 @@ Currently empty - structure exists but no entries have been created yet.
   "_id": ObjectId("65a1b2c3d4e5f6a7b8c9d0e3"),
   "language_code": "kope",
   "language_name": "Kope",
-  "translation_type": "human",
-  "dictionary_name": "Kope Human Dictionary",
+  "dictionary_name": "Kope Dictionary",
   "entries": [],
   "entry_count": 0,
   "created_at": ISODate("2024-01-15T10:30:00.000Z"),
@@ -411,11 +376,9 @@ Currently empty - structure exists but no entries have been created yet.
     "conjunction", "interjection", "pronoun", "article", "other"
   ],
   "metadata": {
-    "description": "Human dictionary for Kope translation work",
+    "description": "Dictionary for Kope translation work",
     "version": "1.0",
-    "status": "active",
-    "generation_method": "human",
-    "ai_model": null
+    "status": "active"
   }
 }
 ```
@@ -425,15 +388,15 @@ Currently empty - structure exists but no entries have been created yet.
 ## Collection: grammar_systems
 
 Stores comprehensive grammar frameworks organized by linguistic categories.
-Currently empty - structure exists but no grammar data has been created yet.
+One document per language.
 
 > **See**: `utils/schema_enforcer/schema_definition.py` for authoritative field definitions
 
 ### Indexes
 
 ```javascript
-// Unique lookup by language and type
-{ "language_code": 1, "translation_type": 1 }
+// Unique lookup by language
+{ "language_code": 1 }
 // unique: true, name: "grammar_lookup"
 ```
 
@@ -444,16 +407,17 @@ Currently empty - structure exists but no grammar data has been created yet.
   "_id": ObjectId,
   "language_code": String,
   "language_name": String,
-  "translation_type": String,       // "human" | "ai"
   "grammar_system_name": String,
   "created_at": ISODate,
   "categories": {
     "phonology": {
       "description": String,
-      "subcategories": [String],
-      "notes": [String],
-      "examples": [String],
-      "ai_confidence": Number | null  // null for human, 0.0-1.0 for AI
+      "subcategories": [String | Object],  // rich format: {name, content, examples, human_verified}
+      "notes": [String | Object],          // rich format: {text, human_verified}
+      "examples": [String | Object],       // rich format: {source_text, english, analysis, human_verified}
+      "ai_confidence": Number | null,
+      "human_verified": Boolean,
+      "updated_at": ISODate | null
     },
     "morphology": {/* same structure */},
     "syntax": {/* same structure */},
@@ -463,10 +427,7 @@ Currently empty - structure exists but no grammar data has been created yet.
   "metadata": {
     "version": String,
     "status": String,
-    "description": String,
-    "generation_method": String,
-    "ai_model": String | null,
-    "human_review_status": String   // "pending" | "reviewed" | "n/a"
+    "description": String
   }
 }
 ```
@@ -488,53 +449,24 @@ Currently empty - structure exists but no grammar data has been created yet.
   "_id": ObjectId("65a1b2c3d4e5f6a7b8c9d0e4"),
   "language_code": "kope",
   "language_name": "Kope",
-  "translation_type": "ai",
-  "grammar_system_name": "Kope NLM-Generated Grammar System",
+  "grammar_system_name": "Kope Grammar System",
   "created_at": ISODate("2024-01-15T10:30:00.000Z"),
   "categories": {
     "phonology": {
       "description": "Sound system and pronunciation rules",
-      "subcategories": ["consonants", "vowels", "tone", "stress", "phonotactics"],
+      "subcategories": [],
       "notes": [],
       "examples": [],
-      "ai_confidence": 0.0
+      "ai_confidence": null,
+      "human_verified": false,
+      "updated_at": null
     },
-    "morphology": {
-      "description": "Word structure and formation",
-      "subcategories": ["noun_morphology", "verb_morphology", "adjective_morphology", "derivation"],
-      "notes": [],
-      "examples": [],
-      "ai_confidence": 0.0
-    },
-    "syntax": {
-      "description": "Sentence structure and word order",
-      "subcategories": ["word_order", "clause_structure", "phrase_structure", "agreement"],
-      "notes": [],
-      "examples": [],
-      "ai_confidence": 0.0
-    },
-    "semantics": {
-      "description": "Meaning and interpretation",
-      "subcategories": ["lexical_semantics", "compositional_semantics", "pragmatics"],
-      "notes": [],
-      "examples": [],
-      "ai_confidence": 0.0
-    },
-    "discourse": {
-      "description": "Text-level organization and coherence",
-      "subcategories": ["paragraph_structure", "narrative_patterns", "discourse_markers"],
-      "notes": [],
-      "examples": [],
-      "ai_confidence": 0.0
-    }
+    // ... other categories same structure
   },
   "metadata": {
     "version": "1.0",
     "status": "active",
-    "description": "NLM-Generated comprehensive grammar system for Kope",
-    "generation_method": "ai",
-    "ai_model": "nlm-v1.0",
-    "human_review_status": "pending"
+    "description": "Grammar system for Kope"
   }
 }
 ```
@@ -543,7 +475,7 @@ Currently empty - structure exists but no grammar data has been created yet.
 
 ## Human Verification Fields
 
-The platform supports verification workflows for AI-generated or imported content. The `human_verified` field appears in multiple collections:
+The platform supports verification workflows for content. The `human_verified` field appears in multiple collections:
 
 ### Verification by Collection
 
@@ -551,7 +483,7 @@ The platform supports verification workflows for AI-generated or imported conten
 |------------|----------------|---------|-------|
 | `bible_texts` | Document root | `false` | Only for non-English verses |
 | `dictionaries` | `entries[].human_verified` | `false` | Per-entry verification |
-| `grammar_systems` | `metadata.human_review_status` | `"pending"` | Document-level status |
+| `grammar_systems` | `categories.<name>.human_verified` | `false` | Per-category verification |
 
 ### bible_texts Verification
 
@@ -563,7 +495,6 @@ For non-English verses, `human_verified` indicates whether a human translator ha
   "book_code": "matthew",
   "chapter": 1,
   "verse": 1,
-  "translation_type": "ai",
   "translated_text": "...",
   "human_verified": false  // Awaiting human review
 }
@@ -592,79 +523,162 @@ Each dictionary entry can be individually verified:
 }
 ```
 
-### Grammar System Verification
+### Grammar Category Verification
 
-Grammar systems use document-level review status in metadata:
+Grammar categories track verification at the category level:
 
 ```javascript
 {
-  "metadata": {
-    "human_review_status": "pending"  // "pending" | "reviewed" | "n/a"
+  "categories": {
+    "phonology": {
+      "human_verified": true,   // Category reviewed by human
+      "updated_at": ISODate("...")
+    }
   }
 }
 ```
 
 ---
 
-## Dual-Level Translation Model
+## Collection: word_index
 
-### Document Relationship
+Tracks word frequency across all verses for a language, with dictionary gap detection. One document per (language, word) pair. Rebuilt asynchronously when verse text is edited.
 
-For each non-English language, the system maintains parallel document sets:
-
-```
-Language: Kope
-|
-+-- bible_books (132 documents)
-|   +-- Genesis (human)
-|   +-- Genesis (ai)
-|   +-- Exodus (human)
-|   +-- Exodus (ai)
-|   +-- ... (66 books x 2 types)
-|
-+-- dictionaries (2 documents)
-|   +-- Kope Human Dictionary
-|   +-- Kope NLM-Generated Dictionary
-|
-+-- grammar_systems (2 documents)
-    +-- Kope Human Grammar System
-    +-- Kope NLM-Generated Grammar System
-```
-
-### Translation Types
-
-| Type | Code | Description |
-|------|------|-------------|
-| Human | `"human"` | Human-translated/curated content |
-| AI | `"ai"` | LLM/NLM-generated content |
-
-### Querying by Translation Type
+### Indexes
 
 ```javascript
-// Get all human translations for a language
-db.bible_books.find({
-  language_code: "kope",
-  translation_type: "human"
-})
+{ "language_code": 1, "word": 1 }  // unique: true
+{ "language_code": 1, "total_count": -1 }  // frequency lookup
+{ "language_code": 1, "in_dictionary": 1 }  // name: "dictionary_gap"
+```
 
-// Get AI grammar system
-db.grammar_systems.findOne({
-  language_code: "kope",
-  translation_type: "ai"
-})
+### Schema
 
-// Compare human vs AI for same book
-const humanGenesis = db.bible_books.findOne({
-  language_code: "kope",
-  book_code: "genesis",
-  translation_type: "human"
-})
+```javascript
+{
+  "_id": ObjectId,
+  "language_code": String,
+  "word": String,
+  "total_count": Number,           // Total occurrences across all verses
+  "book_count": Number,            // Number of distinct books containing this word
+  "chapter_count": Number,         // Number of distinct chapters
+  "in_dictionary": Boolean,        // Whether the word exists in the dictionary
+  "first_seen": {                  // First occurrence location
+    "book_code": String,
+    "chapter": Number,
+    "verse": Number
+  },
+  "last_rebuilt": ISODate,         // When this word's index was last rebuilt
+  "occurrences": [                 // Sample occurrences (capped)
+    { "book_code": String, "chapter": Number, "verse": Number }
+  ]
+}
+```
 
-const aiGenesis = db.bible_books.findOne({
-  language_code: "kope",
-  book_code: "genesis",
-  translation_type: "ai"
-})
+---
+
+## Collection: language_notes
+
+Per-language notes and observations. One document per language with embedded notes array.
+
+### Indexes
+
+```javascript
+{ "language_code": 1 }  // unique: true
+```
+
+### Schema
+
+```javascript
+{
+  "_id": ObjectId,
+  "language_code": String,
+  "notes": [
+    {
+      "id": String,                // UUID
+      "text": String,
+      "created_at": ISODate,
+      "updated_at": ISODate
+    }
+  ],
+  "updated_at": ISODate            // Optional
+}
+```
+
+---
+
+## Collection: correction_log
+
+Log of text corrections across Bible verses, dictionary entries, and grammar categories. One document per correction event.
+
+### Indexes
+
+```javascript
+{ "language_code": 1, "created_at": -1 }
+{ "language_code": 1, "content_type": 1, "created_at": -1 }
+```
+
+### Schema
+
+```javascript
+{
+  "_id": ObjectId,
+  "language_code": String,
+  "content_type": String,          // "bible_verse" | "dictionary_entry" | "grammar_category"
+  "content_reference": {           // Varies by content_type
+    "book_code": String,           // For bible_verse
+    "chapter": Number,
+    "verse": Number,
+    "word": String,                // For dictionary_entry
+    "category": String             // For grammar_category
+  },
+  "original_text": String,
+  "what_was_wrong": String,
+  "correction": String,
+  "created_at": ISODate
+}
+```
+
+---
+
+## Collection: chat_conversations
+
+AI chat conversation history. One document per conversation, with embedded message array. Also stores pending tool call state for the write-tool approval gate.
+
+### Indexes
+
+```javascript
+{ "updated_at": -1 }  // Newest-first listing
+```
+
+### Schema
+
+```javascript
+{
+  "_id": ObjectId,
+  "title": String,
+  "messages": [
+    {
+      "role": String,              // "user" | "assistant"
+      "content": String,
+      "timestamp": String,         // ISO 8601
+      "tool_calls": [String],      // Optional, tool names used
+      "thinking_content": String   // Optional, assistant thinking text
+    }
+  ],
+  "message_count": Number,
+  "created_at": String,            // ISO 8601
+  "updated_at": String,            // ISO 8601
+  "pending_tool_call": {           // Present only when a write-tool is awaiting approval
+    "call_id": String,
+    "tool_name": String,
+    "input": Object,
+    "messages_snapshot": Array,    // Full Anthropic-format message history
+    "system_prompt": String,       // Optional
+    "thinking_enabled": Boolean,
+    "created_at": String
+  }
+}
 ```
 
 ---
@@ -686,23 +700,16 @@ const aiGenesis = db.bible_books.findOne({
 | Collection | English | Non-English |
 |------------|---------|-------------|
 | languages | 1 | 1 |
-| bible_books | 66 | 132 |
-| dictionaries | 1 | 2 |
-| grammar_systems | 1 | 2 |
-| **Total** | **69** | **137** |
+| bible_books | 66 | 66 |
+| dictionaries | 1 | 1 |
+| grammar_systems | 1 | 1 |
+| **Total** | **69** | **69** |
 
 ---
 
 ## Migration Notes
 
-### From PostgreSQL
-
-The project is transitioning from a PostgreSQL schema where:
-- Each language had its own database (e.g., `kope_bible`)
-- Books were individual tables (e.g., `book_genesis`)
-- Grammar used dynamic columns
-
-### Current MongoDB Approach
+The MongoDB migration from the original PostgreSQL prototype is complete. The current approach uses:
 
 - Single database with language-based filtering
 - Embedded documents for chapters/verses in `bible_books`
@@ -713,10 +720,9 @@ The project is transitioning from a PostgreSQL schema where:
 ##  USFM Import for English NET (Base Language)
 
 
-cd back_end
+cd /filepath/back_end
 
-# Import entire engnet directory
+# Import entire eng-web directory
 python -m utils.usfm_parser.usfm_importer \
-    ../data/bibles/engnet_usfm/ \
-    english \
-    human
+    ../data/bibles/eng-web_usfm/ \
+    english

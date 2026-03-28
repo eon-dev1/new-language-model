@@ -17,7 +17,7 @@ python -m mcp_server.server
 
 ## Claude Code Configuration
 
-Add to `~/.claude/claude_code_config.json`:
+Add to your project-level `.mcp.json` or `~/.claude.json`:
 
 ```json
 {
@@ -25,7 +25,7 @@ Add to `~/.claude/claude_code_config.json`:
     "nlm-database": {
       "command": "python",
       "args": ["-m", "mcp_server.server"],
-      "cwd": "/path/to/nlm_public/back_end"
+      "cwd": "/path/to/nlm/back_end"
     }
   }
 }
@@ -69,6 +69,8 @@ Or for VS Code, add to `.vscode/mcp.json`:
 - `list_bible_books` - Get all Bible books for a language
 - `get_chapter` - Get all verses for a Bible chapter
 - `get_bible_chunk` - Get paginated Bible verses for large text processing
+- `save_bible_batches` - Save multiple batches of verses to files in one call
+- `get_parallel_verses` - Fetch verses across multiple languages for comparison
 
 ### Dictionary Tools
 - `list_dictionary_entries` - Get paginated dictionary entries
@@ -80,10 +82,20 @@ Or for VS Code, add to `.vscode/mcp.json`:
 - `get_grammar_category` - Get specific grammar category content
 - `update_grammar_category` - Update grammar category content
 
+### Word Index Tools
+- `get_word_index` - Look up a word's frequency, locations, and dictionary status
+- `get_words_not_in_dictionary` - Find frequent corpus words missing from the dictionary
+- `get_word_frequency_list` - Get top N most frequent words with dictionary status
+
+### Memories Tools
+- `list_language_notes` - List all notes for a language, sorted by recency
+- `search_language_notes` - Search notes by phrase (case-insensitive)
+- `list_correction_log` - List correction log entries with optional type filtering
+- `search_correction_log` - Search correction log across text fields
+
 ## Common Parameters
 
 - `language_code`: Language identifier (e.g., 'english', 'heb', 'kope')
-- `translation_type`: Filter by 'human' or 'ai' translations (optional for reads, required for writes)
 
 ## Testing
 

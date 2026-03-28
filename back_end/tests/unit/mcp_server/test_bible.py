@@ -36,17 +36,6 @@ class TestListBibleBooks:
             assert "book_order" in book
 
     @pytest.mark.asyncio
-    async def test_list_bible_books_filters_by_translation_type(self, mock_mcp_db):
-        """Filters books by translation type when specified"""
-        from mcp_server.tools.bible import list_bible_books
-
-        result = await list_bible_books(mock_mcp_db, "heb", translation_type="human")
-
-        # All returned books should be human translations
-        for book in result["books"]:
-            assert book.get("translation_type") == "human"
-
-    @pytest.mark.asyncio
     async def test_list_bible_books_language_not_found(self, mock_mcp_db):
         """Returns error for nonexistent language"""
         from mcp_server.tools.bible import list_bible_books
@@ -55,17 +44,6 @@ class TestListBibleBooks:
 
         assert "error" in result
         assert result["error"]["code"] == "not_found"
-
-    @pytest.mark.asyncio
-    async def test_list_bible_books_empty_language(self, mock_mcp_db):
-        """Returns empty list for language with no books"""
-        from mcp_server.tools.bible import list_bible_books
-
-        # English exists but let's query with a type that has no books
-        result = await list_bible_books(mock_mcp_db, "english", translation_type="ai")
-
-        assert result["books"] == []
-        assert result["count"] == 0
 
     @pytest.mark.asyncio
     async def test_list_bible_books_sorted_by_canonical_order(self, mock_mcp_db):
@@ -174,16 +152,6 @@ class TestGetChapter:
         # Should work, not error
         assert "verses" in result or "error" not in result
 
-    @pytest.mark.asyncio
-    async def test_get_chapter_with_translation_type(self, mock_mcp_db):
-        """Filters by translation type when specified"""
-        from mcp_server.tools.bible import get_chapter
-
-        result = await get_chapter(
-            mock_mcp_db, "heb", "genesis", 1, translation_type="human"
-        )
-
-        assert "verses" in result
 
 
 class TestGetBibleChunk:
@@ -595,9 +563,9 @@ class TestSaveBibleBatches:
 
         monkeypatch.setattr(base, "TEMP_FILES_DIR", tmp_path)
 
-        # Query with AI translation type which doesn't exist in test data
+        # Query a book that has no verses in test data
         result = await save_bible_batches(
-            mock_mcp_db, "english", translation_type="ai"
+            mock_mcp_db, "english", book_code="revelation"
         )
 
         assert result["batches_saved"] == 0
@@ -668,18 +636,6 @@ class TestSaveBibleBatches:
 
         result = await save_bible_batches(
             mock_mcp_db, "english", book_code="invalid book!"
-        )
-
-        assert "error" in result
-        assert result["error"]["code"] == "invalid_input"
-
-    @pytest.mark.asyncio
-    async def test_invalid_translation_type(self, mock_mcp_db):
-        """Invalid translation_type returns error"""
-        from mcp_server.tools.bible import save_bible_batches
-
-        result = await save_bible_batches(
-            mock_mcp_db, "english", translation_type="invalid"
         )
 
         assert "error" in result
@@ -770,20 +726,6 @@ class TestSaveBibleBatches:
         for verse in content["verses"]:
             assert verse["book_code"] == "genesis"
 
-    @pytest.mark.asyncio
-    async def test_translation_type_filter(self, mock_mcp_db, tmp_path, monkeypatch):
-        """translation_type filter limits to human or ai"""
-        from mcp_server.tools import base
-        from mcp_server.tools.bible import save_bible_batches
-
-        monkeypatch.setattr(base, "TEMP_FILES_DIR", tmp_path)
-
-        # Hebrew has 5 human verses in test data
-        result = await save_bible_batches(
-            mock_mcp_db, "heb", translation_type="human", batch_size=10
-        )
-
-        assert result["verses_saved"] == 5
 
 
 class TestGetParallelVerses:
@@ -939,7 +881,7 @@ class TestGetParallelVerses:
 
     @pytest.mark.asyncio
     async def test_parallel_translation_object_shape(self, mock_mcp_db):
-        """Each translation has text, translation_type, and human_verified (non-English)"""
+        """Each translation has text; non-English also has human_verified"""
         from mcp_server.tools.bible import get_parallel_verses
 
         result = await get_parallel_verses(
@@ -951,13 +893,11 @@ class TestGetParallelVerses:
         # English translation
         eng = verse["translations"]["english"]
         assert "text" in eng
-        assert "translation_type" in eng
         assert "human_verified" not in eng  # English has no human_verified
 
         # Hebrew translation
         heb = verse["translations"]["heb"]
         assert "text" in heb
-        assert "translation_type" in heb
         assert "human_verified" in heb  # Non-English has human_verified
 
     # === Happy Path ===
@@ -1032,43 +972,37 @@ class TestGetParallelVerses:
     # === Translation Priority: Human > AI ===
 
     @pytest.mark.asyncio
-    async def test_parallel_human_preferred_over_ai(self, mock_mcp_db):
-        """When both human and AI exist, returns human translation"""
+    async def test_parallel_verse_with_translated_text_returns_text(self, mock_mcp_db):
+        """A verse with translated_text returns that text"""
         from mcp_server.tools.bible import get_parallel_verses
 
-        # Bughotu verse 5 has both human and AI translations in test data
+        # Bughotu verse 5 has translated_text in test data
         result = await get_parallel_verses(
             mock_mcp_db, ["english", "bughotu"], "genesis", 1, verse_start=5, verse_end=5
         )
 
         verse5 = result["parallel_verses"][0]
+        assert "bughotu" in verse5["translations"]
         bughotu_trans = verse5["translations"]["bughotu"]
-
-        # Should return human, not AI
-        assert bughotu_trans["translation_type"] == "human"
-        assert bughotu_trans["human_verified"] is True
-        assert "Human verified" in bughotu_trans["text"]
+        assert bughotu_trans["text"]  # text is non-empty
 
     @pytest.mark.asyncio
-    async def test_parallel_ai_returned_when_only_ai_exists(self, mock_mcp_db):
-        """When only AI exists, returns AI translation with correct type"""
+    async def test_parallel_verse_with_no_translation_absent_from_translations(self, mock_mcp_db):
+        """A verse with no translation for a language is absent from that language's translations"""
         from mcp_server.tools.bible import get_parallel_verses
 
-        # Bughotu verse 3 only has AI translation in test data
+        # Bughotu has no verse 1 (only verses 3-7)
         result = await get_parallel_verses(
-            mock_mcp_db, ["english", "bughotu"], "genesis", 1, verse_start=3, verse_end=3
+            mock_mcp_db, ["english", "bughotu"], "genesis", 1, verse_start=1, verse_end=1
         )
 
-        verse3 = result["parallel_verses"][0]
-        bughotu_trans = verse3["translations"]["bughotu"]
-
-        # Should return AI
-        assert bughotu_trans["translation_type"] == "ai"
-        assert bughotu_trans["human_verified"] is False
+        verse1 = result["parallel_verses"][0]
+        assert "english" in verse1["translations"]
+        assert "bughotu" not in verse1["translations"]  # No translation exists
 
     @pytest.mark.asyncio
-    async def test_parallel_english_always_human(self, mock_mcp_db):
-        """English verses always have translation_type=human"""
+    async def test_parallel_english_has_text_no_human_verified(self, mock_mcp_db):
+        """English translations have text but no human_verified field"""
         from mcp_server.tools.bible import get_parallel_verses
 
         result = await get_parallel_verses(
@@ -1077,7 +1011,9 @@ class TestGetParallelVerses:
 
         for verse in result["parallel_verses"]:
             if "english" in verse["translations"]:
-                assert verse["translations"]["english"]["translation_type"] == "human"
+                eng = verse["translations"]["english"]
+                assert "text" in eng
+                assert "human_verified" not in eng
 
     # === Missing Translations ===
 

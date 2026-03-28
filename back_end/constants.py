@@ -2,8 +2,8 @@
 """
 Centralized constants for the NLM backend.
 
-Provides enums and constants for collection names, translation types,
-and other magic strings used throughout the codebase.
+Provides enums and constants for collection names and other magic strings
+used throughout the codebase.
 """
 
 from enum import Enum
@@ -17,9 +17,6 @@ class Collection(str, Enum):
     BIBLE_TEXTS = "bible_texts"
     DICTIONARIES = "dictionaries"
     GRAMMAR_SYSTEMS = "grammar_systems"
-
-
-class TranslationType(str, Enum):
-    """Translation type identifiers for dual-level content."""
-    HUMAN = "human"
-    AI = "ai"
+    WORD_INDEX = "word_index"
+    LANGUAGE_NOTES = "language_notes"
+    CORRECTION_LOG = "correction_log"

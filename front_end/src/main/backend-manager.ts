@@ -4,6 +4,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as http from 'http';
+import { shortPath, ts } from './utils';
 
 const BACKEND_PORT = 8221;
 const BACKEND_HOST = '127.0.0.1';
@@ -52,14 +53,14 @@ export function startBackend(): ChildProcess {
   const backendDir = path.resolve(__dirname, '../../../back_end');
 
   console.log('[Backend Manager] Starting backend server...');
-  console.log('[Backend Manager] Backend directory:', backendDir);
+  console.log(`[Backend Manager ${ts()}] Backend directory:`, shortPath(backendDir));
 
   // Use Python from the virtual environment
   const venvPython = process.platform === 'win32'
     ? path.join(backendDir, 'nlm_backend_venv', 'Scripts', 'python.exe')
     : path.join(backendDir, 'nlm_backend_venv', 'bin', 'python');
 
-  console.log('[Backend Manager] Using Python:', venvPython);
+  console.log(`[Backend Manager ${ts()}] Using Python:`, shortPath(venvPython, 3));
 
   backendProcess = spawn(venvPython, ['main.py'], {
     cwd: backendDir,
@@ -68,18 +69,33 @@ export function startBackend(): ChildProcess {
   });
 
   // Log backend stdout
+  let stdoutBuffer = '';
   backendProcess.stdout?.on('data', (data: Buffer) => {
-    const lines = data.toString().trim().split('\n');
+    stdoutBuffer += data.toString();
+    const lines = stdoutBuffer.split('\n');
+    stdoutBuffer = lines.pop() ?? '';
     lines.forEach(line => {
-      console.log('[Backend]', line);
+      if (line.trim()) console.log(`[Backend ${ts()}]`, line);
     });
   });
 
   // Log backend stderr
+  let stderrBuffer = '';
   backendProcess.stderr?.on('data', (data: Buffer) => {
-    const lines = data.toString().trim().split('\n');
+    stderrBuffer += data.toString();
+    const lines = stderrBuffer.split('\n');
+    stderrBuffer = lines.pop() ?? '';  // hold incomplete trailing fragment
     lines.forEach(line => {
-      console.error('[Backend Error]', line);
+      if (!line.trim()) return;
+      if (/^\s*(INFO|DEBUG):/.test(line)) {
+        console.log(`[Backend INFO ${ts()}]`, line);
+      } else if (/^\s*WARNING:/.test(line)) {
+        console.warn(`[Backend WARNING ${ts()}]`, line);
+      } else if (/^\s*ERROR:/.test(line)) {
+        console.error(`[Backend ERROR ${ts()}]`, line);
+      } else {
+        console.log(`[Backend ${ts()}]`, line);  // unrecognized format
+      }
     });
   });
 

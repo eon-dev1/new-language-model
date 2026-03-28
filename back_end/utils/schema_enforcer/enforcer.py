@@ -209,8 +209,8 @@ class SchemaEnforcer:
                         # Add timestamps
                         now = datetime.now(timezone.utc)
                         doc["created_at"] = now
-                        if "translation_levels" in doc and "human" in doc["translation_levels"]:
-                            doc["translation_levels"]["human"]["last_updated"] = now
+                        if "translation_stats" in doc:
+                            doc["translation_stats"]["last_updated"] = now
 
                         await coll.insert_one(doc)
                         self.report.mark_created("seed_data", seed_name)

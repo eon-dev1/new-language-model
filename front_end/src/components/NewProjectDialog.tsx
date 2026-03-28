@@ -14,7 +14,8 @@ import {
   FormLabel,
   RadioGroup,
   FormControlLabel,
-  Radio
+  Radio,
+  Checkbox
 } from '@mui/material';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import { selectFolder, importBible, importHtmlBible } from '../renderer/api';
@@ -39,6 +40,7 @@ export const NewProjectDialog: React.FC<NewProjectDialogProps> = ({
   const [languageName, setLanguageName] = useState('');
   const [folderPath, setFolderPath] = useState('');
   const [format, setFormat] = useState<'usfm' | 'html'>('usfm');
+  const [humanVerified, setHumanVerified] = useState(false);
   const [importState, setImportState] = useState<ImportState>({
     status: 'idle',
     message: ''
@@ -70,13 +72,13 @@ export const NewProjectDialog: React.FC<NewProjectDialogProps> = ({
             language_code: languageCode,
             language_name: languageName,
             usfm_directory: folderPath,
-            translation_type: 'human'
+            human_verified: humanVerified,
           })
         : await importHtmlBible({
             language_code: languageCode,
             language_name: languageName,
             html_directory: folderPath,
-            translation_type: 'human'
+            human_verified: humanVerified,
           });
 
       setImportState({
@@ -101,6 +103,7 @@ export const NewProjectDialog: React.FC<NewProjectDialogProps> = ({
     setLanguageName('');
     setFolderPath('');
     setFormat('usfm');
+    setHumanVerified(false);
     setImportState({ status: 'idle', message: '' });
     onClose();
   };
@@ -154,6 +157,24 @@ export const NewProjectDialog: React.FC<NewProjectDialogProps> = ({
             </Button>
           </Box>
 
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={humanVerified}
+                onChange={(e) => setHumanVerified(e.target.checked)}
+                disabled={importState.status === 'importing'}
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body2">Mark as pre-verified</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Check this if the translation has already been reviewed externally and does not need re-verification in this workflow.
+                </Typography>
+              </Box>
+            }
+          />
+
           {importState.status === 'importing' && (
             <Box>
               <Typography variant="body2" color="text.secondary">
@@ -173,12 +194,7 @@ export const NewProjectDialog: React.FC<NewProjectDialogProps> = ({
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button
-          onClick={handleClose}
-          disabled={importState.status === 'importing'}
-        >
-          Cancel
-        </Button>
+        <Button onClick={handleClose} disabled={importState.status === 'importing'}>Cancel</Button>
         <Button
           onClick={handleImport}
           variant="contained"

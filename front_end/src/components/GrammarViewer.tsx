@@ -9,7 +9,7 @@
  * - Verify button for marking categories as verified
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -22,11 +22,14 @@ import {
   Button,
   CircularProgress,
   Divider,
-  Tabs,
-  Tab,
   Card,
   CardContent,
-  CardActionArea
+  CardActionArea,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  InputAdornment
 } from '@mui/material';
 import {
   ArrowBack,
@@ -35,35 +38,58 @@ import {
   Cancel,
   CheckCircle,
   CheckCircleOutline,
-  Person,
-  SmartToy,
   RecordVoiceOver,
   Extension,
   AccountTree,
   Psychology,
-  Forum
+  Forum,
+  Add,
+  Delete,
+  Search
 } from '@mui/icons-material';
 import { motion } from 'framer-motion';
 import {
   fetchGrammarCategories,
   saveGrammarCategory,
   verifyGrammarCategory,
+  verifyGrammarSubcategory,
+  verifyGrammarNote,
+  verifyGrammarExample,
+  appendCorrectionLog,
   MergedGrammarCategory,
   GrammarCategoryVersion,
   SubcategoryItem,
   SubcategoryData,
+  NoteItem,
+  NoteData,
   ExampleItem,
   ExampleData
 } from '../renderer/api';
+import { useChat } from '../renderer/contexts/ChatContext';
+import { TOPBAR_HEIGHT } from '../renderer/constants';
+import {
+  IndexedItem,
+  isSubcategoryData,
+  isExampleData,
+  isNoteData,
+  getNoteText,
+  getSubcategoryLabel,
+  getExampleSourceText,
+  filterSubcategories,
+  filterNotes,
+  filterExamples,
+  filterCategoryByContent
+} from './searchFilters';
+import { CopyIconButton } from './CopyIconButton';
 
 interface GrammarViewerProps {
   languageCode: string;
   languageName: string;
   onBack: () => void;
+  embeddedMode?: boolean;
 }
 
 type ViewState = 'categories' | 'detail';
-type TabValue = 'human' | 'ai';
 
 // Category display configuration
 const CATEGORY_CONFIG: Record<string, { icon: React.ReactNode; color: string; description: string }> = {
@@ -94,39 +120,93 @@ const CATEGORY_CONFIG: Record<string, { icon: React.ReactNode; color: string; de
   }
 };
 
-// --- Type Guards and Helpers for Rich Data ---
+// --- Rich Edit Form Types ---
 
-/** Check if a subcategory is a rich object (AI-generated) vs simple string (human). */
-function isSubcategoryData(item: SubcategoryItem): item is SubcategoryData {
-  return typeof item === 'object' && item !== null && 'name' in item;
+interface EditFormState {
+  notes: NoteData[];
+  subcategories: SubcategoryData[];
+  examples: ExampleData[];
 }
 
-/** Check if an example is a rich object (AI-generated) vs simple string (human). */
-function isExampleData(item: ExampleItem): item is ExampleData {
-  return typeof item === 'object' && item !== null && 'bughotu' in item;
+// --- Generic Nested Item Editor ---
+
+interface FieldConfig {
+  name: string;
+  label: string;
+  multiline?: boolean;
+  rows?: number;
+  isArray?: boolean;  // If true, split/join by newlines
 }
 
-/** Check if a category version contains rich (non-editable) data. */
-function hasRichData(version: GrammarCategoryVersion | undefined): boolean {
-  if (!version) return false;
-  const hasRichSubcats = version.subcategories?.some(isSubcategoryData) ?? false;
-  const hasRichExamples = version.examples?.some(isExampleData) ?? false;
-  return hasRichSubcats || hasRichExamples;
+interface NestedItemEditorProps<T extends Record<string, unknown>> {
+  items: T[];
+  onChange: (items: T[]) => void;
+  fields: FieldConfig[];
+  addLabel: string;
+  emptyItem: T;
 }
 
-/** Get display label for a subcategory (handles both formats). */
-function getSubcategoryLabel(item: SubcategoryItem): string {
-  if (isSubcategoryData(item)) {
-    return item.name.replace(/_/g, ' ');
-  }
-  return String(item).replace(/_/g, ' ');
+function NestedItemEditor<T extends Record<string, unknown>>({
+  items,
+  onChange,
+  fields,
+  addLabel,
+  emptyItem
+}: NestedItemEditorProps<T>) {
+  const handleAdd = () => onChange([...items, { ...emptyItem }]);
+
+  const handleUpdate = (index: number, field: string, value: unknown) => {
+    const updated = [...items];
+    updated[index] = { ...updated[index], [field]: value };
+    onChange(updated);
+  };
+
+  const handleRemove = (index: number) => {
+    onChange(items.filter((_, i) => i !== index));
+  };
+
+  return (
+    <Box>
+      {items.map((item, i) => (
+        <Paper key={i} sx={{ p: 2, mb: 2, bgcolor: 'rgba(255,255,255,0.05)' }}>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+            <IconButton onClick={() => handleRemove(i)} size="small" sx={{ color: '#f44336' }}>
+              <Delete />
+            </IconButton>
+          </Box>
+          {fields.map(field => (
+            <TextField
+              key={field.name}
+              label={field.label}
+              value={field.isArray
+                ? ((item[field.name] as string[] | undefined) || []).join('\n')
+                : ((item[field.name] as string | undefined) || '')}
+              onChange={(e) => handleUpdate(
+                i,
+                field.name,
+                field.isArray ? e.target.value.split('\n') : e.target.value
+              )}
+              fullWidth
+              multiline={field.multiline}
+              rows={field.rows || 3}
+              sx={{ mb: 2 }}
+              InputProps={{ sx: { color: 'white' } }}
+              InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.5)' } }}
+            />
+          ))}
+        </Paper>
+      ))}
+      <Button startIcon={<Add />} onClick={handleAdd} variant="outlined" sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}>
+        {addLabel}
+      </Button>
+    </Box>
+  );
 }
 
-export function GrammarViewer({ languageCode, languageName, onBack }: GrammarViewerProps) {
+export function GrammarViewer({ languageCode, languageName, onBack, embeddedMode = false }: GrammarViewerProps) {
   // Navigation state
   const [view, setView] = useState<ViewState>('categories');
   const [selectedCategory, setSelectedCategory] = useState<MergedGrammarCategory | null>(null);
-  const [activeTab, setActiveTab] = useState<TabValue>('human');
 
   // Data state
   const [categories, setCategories] = useState<MergedGrammarCategory[]>([]);
@@ -135,11 +215,30 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
-  const [editForm, setEditForm] = useState({
-    notes: '',
-    examples: ''
+  const [editForm, setEditForm] = useState<EditFormState>({
+    notes: [],
+    subcategories: [],
+    examples: []
   });
   const [saving, setSaving] = useState(false);
+  const [correctionNote, setCorrectionNote] = useState('');
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Modal edit state
+  const [editModal, setEditModal] = useState<{
+    type: 'subcategory' | 'note' | 'example';
+    index: number;
+    value: SubcategoryData | NoteData | ExampleData;
+  } | null>(null);
+  const [modalSaving, setModalSaving] = useState(false);
+
+  // Report context to chat
+  const { setAppContext, injectContextNote } = useChat();
+  useEffect(() => {
+    setAppContext({ languageCode, bookCode: null, chapter: null, view: 'grammar' });
+  }, [languageCode, setAppContext]);
 
   // Load categories on mount
   useEffect(() => {
@@ -162,13 +261,13 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
 
   const handleSelectCategory = (category: MergedGrammarCategory) => {
     setSelectedCategory(category);
-    // Default to human tab if exists, otherwise ai
-    setActiveTab(category.human ? 'human' : 'ai');
+    setSearchQuery('');
     setView('detail');
     setIsEditing(false);
   };
 
   const handleBack = () => {
+    setSearchQuery('');
     if (view === 'detail') {
       setView('categories');
       setSelectedCategory(null);
@@ -178,22 +277,31 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
     }
   };
 
-  const handleTabChange = (_: React.SyntheticEvent, newValue: TabValue) => {
-    setActiveTab(newValue);
-    setIsEditing(false);
-  };
-
   const handleStartEdit = () => {
-    const currentVersion = activeTab === 'human' ? selectedCategory?.human : selectedCategory?.ai;
-    setEditForm({
-      notes: currentVersion?.notes?.join('\n') || '',
-      examples: currentVersion?.examples?.join('\n') || ''
-    });
+    setCorrectionNote('');
+
+    // Convert flat strings to rich format (legacy support on READ only)
+    const notes: NoteData[] = (selectedCategory?.notes || []).map(note =>
+      isNoteData(note) ? note : { text: String(note), human_verified: false }
+    );
+
+    const subcategories = (selectedCategory?.subcategories || []).map(sub =>
+      isSubcategoryData(sub) ? sub : { name: String(sub), content: '', examples: [] }
+    );
+
+    const examples = (selectedCategory?.examples || []).map(ex =>
+      isExampleData(ex)
+        ? { source_text: getExampleSourceText(ex), english: ex.english, analysis: ex.analysis, human_verified: ex.human_verified }
+        : { source_text: String(ex), english: '', analysis: '', human_verified: false }
+    );
+
+    setEditForm({ notes, subcategories, examples });
     setIsEditing(true);
   };
 
   const handleCancelEdit = () => {
     setIsEditing(false);
+    setCorrectionNote('');
   };
 
   const handleSave = async () => {
@@ -202,8 +310,9 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
     setSaving(true);
     try {
       await saveGrammarCategory(languageCode, selectedCategory.name, {
-        notes: editForm.notes.split('\n').filter(n => n.trim()),
-        examples: editForm.examples.split('\n').filter(e => e.trim())
+        notes: editForm.notes,
+        subcategories: editForm.subcategories,
+        examples: editForm.examples
       });
 
       // Reload categories to get updated data
@@ -214,8 +323,20 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
       const updated = updatedCategories.categories.find(c => c.name === selectedCategory.name);
       if (updated) {
         setSelectedCategory(updated);
-        setActiveTab('human'); // Saved content is always human
       }
+
+      if (correctionNote.trim()) {
+        const correctedContent = editForm.notes.map(n => n.text).join(' ');
+        injectContextNote(`[Correction note] Grammar/${selectedCategory.name}: ${correctionNote}\nCorrected text: "${correctedContent}"`);
+        appendCorrectionLog(languageCode, {
+          content_type: 'grammar_category',
+          content_reference: { category: selectedCategory.name },
+          original_text: '',
+          what_was_wrong: correctionNote.trim(),
+          correction: correctedContent,
+        }).catch(err => console.error('Correction log save failed:', err));
+      }
+      setCorrectionNote('');
 
       setIsEditing(false);
     } catch (err) {
@@ -228,49 +349,239 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
   const handleVerify = async () => {
     if (!selectedCategory) return;
 
-    const currentVersion = activeTab === 'human' ? selectedCategory.human : selectedCategory.ai;
-    if (!currentVersion) return;
-
-    const newVerified = !currentVersion.human_verified;
+    const newVerified = !selectedCategory.human_verified;
 
     try {
-      await verifyGrammarCategory(languageCode, selectedCategory.name, activeTab, newVerified);
+      await verifyGrammarCategory(languageCode, selectedCategory.name, newVerified);
 
-      // Update local state
       setCategories(prev => prev.map(c => {
         if (c.name === selectedCategory.name) {
-          const updated = { ...c };
-          if (activeTab === 'human' && updated.human) {
-            updated.human = { ...updated.human, human_verified: newVerified };
-          } else if (activeTab === 'ai' && updated.ai) {
-            updated.ai = { ...updated.ai, human_verified: newVerified };
-          }
-          return updated;
+          return { ...c, human_verified: newVerified };
         }
         return c;
       }));
 
-      // Update selected category
-      setSelectedCategory(prev => {
-        if (!prev) return prev;
-        const updated = { ...prev };
-        if (activeTab === 'human' && updated.human) {
-          updated.human = { ...updated.human, human_verified: newVerified };
-        } else if (activeTab === 'ai' && updated.ai) {
-          updated.ai = { ...updated.ai, human_verified: newVerified };
-        }
-        return updated;
-      });
+      setSelectedCategory(prev => prev ? { ...prev, human_verified: newVerified } : prev);
     } catch (err) {
       console.error('Failed to verify category:', err);
     }
   };
 
-  // Get current version based on active tab
-  const getCurrentVersion = (): GrammarCategoryVersion | undefined => {
-    if (!selectedCategory) return undefined;
-    return activeTab === 'human' ? selectedCategory.human : selectedCategory.ai;
+  const handleSubcategoryVerify = async (subcategoryIndex: number, currentlyVerified: boolean) => {
+    if (!selectedCategory) return;
+
+    const newVerified = !currentlyVerified;
+
+    try {
+      await verifyGrammarSubcategory(
+        languageCode,
+        selectedCategory.name,
+        subcategoryIndex,
+        newVerified
+      );
+
+      const updateSubcategories = (subcats: SubcategoryItem[]): SubcategoryItem[] => {
+        return subcats.map((sub, i) => {
+          if (i === subcategoryIndex && isSubcategoryData(sub)) {
+            return { ...sub, human_verified: newVerified };
+          }
+          return sub;
+        });
+      };
+
+      setCategories(prev => prev.map(c => {
+        if (c.name === selectedCategory.name) {
+          return { ...c, subcategories: updateSubcategories(c.subcategories) };
+        }
+        return c;
+      }));
+
+      setSelectedCategory(prev => {
+        if (!prev) return prev;
+        return { ...prev, subcategories: updateSubcategories(prev.subcategories) };
+      });
+    } catch (err) {
+      console.error('Failed to verify subcategory:', err);
+    }
   };
+
+  const handleNoteVerify = async (noteIndex: number, currentlyVerified: boolean) => {
+    if (!selectedCategory) return;
+
+    const newVerified = !currentlyVerified;
+
+    try {
+      await verifyGrammarNote(languageCode, selectedCategory.name, noteIndex, newVerified);
+
+      const updateNotes = (notes: NoteItem[]): NoteItem[] => {
+        return notes.map((note, i) => {
+          if (i === noteIndex) {
+            if (isNoteData(note)) {
+              return { ...note, human_verified: newVerified };
+            }
+            return { text: String(note), human_verified: newVerified };
+          }
+          return note;
+        });
+      };
+
+      setCategories(prev => prev.map(c => {
+        if (c.name === selectedCategory.name) {
+          return { ...c, notes: updateNotes(c.notes) };
+        }
+        return c;
+      }));
+
+      setSelectedCategory(prev => {
+        if (!prev) return prev;
+        return { ...prev, notes: updateNotes(prev.notes) };
+      });
+    } catch (err) {
+      console.error('Failed to verify note:', err);
+    }
+  };
+
+  const handleExampleVerify = async (exampleIndex: number, currentlyVerified: boolean) => {
+    if (!selectedCategory) return;
+
+    const newVerified = !currentlyVerified;
+
+    try {
+      await verifyGrammarExample(languageCode, selectedCategory.name, exampleIndex, newVerified);
+
+      const updateExamples = (examples: ExampleItem[]): ExampleItem[] => {
+        return examples.map((ex, i) => {
+          if (i === exampleIndex && isExampleData(ex)) {
+            return { ...ex, human_verified: newVerified };
+          }
+          return ex;
+        });
+      };
+
+      setCategories(prev => prev.map(c => {
+        if (c.name === selectedCategory.name) {
+          return { ...c, examples: updateExamples(c.examples) };
+        }
+        return c;
+      }));
+
+      setSelectedCategory(prev => {
+        if (!prev) return prev;
+        return { ...prev, examples: updateExamples(prev.examples) };
+      });
+    } catch (err) {
+      console.error('Failed to verify example:', err);
+    }
+  };
+
+  // Modal handlers for per-item editing
+  const handleOpenEditModal = (
+    type: 'subcategory' | 'note' | 'example',
+    index: number,
+    value: SubcategoryData | NoteItem | ExampleData
+  ) => {
+    // For notes, convert to NoteData if string
+    if (type === 'note') {
+      const noteValue = isNoteData(value as NoteItem)
+        ? { ...(value as NoteData) }
+        : { text: String(value), human_verified: false };
+      setEditModal({ type, index, value: noteValue });
+      return;
+    }
+    // For subcategories/examples, clone to avoid direct mutation
+    const clonedValue = { ...(value as SubcategoryData | ExampleData) };
+    setEditModal({ type, index, value: clonedValue });
+  };
+
+  const handleCloseEditModal = () => {
+    setEditModal(null);
+  };
+
+  const handleSaveEditModal = async () => {
+    if (!editModal || !selectedCategory) return;
+
+    const currentVersion = getCurrentVersion();
+    if (!currentVersion) return;
+
+    setModalSaving(true);
+
+    try {
+      // Build updated arrays based on modal type - convert to rich format
+      let updatedNotes: NoteData[] = (currentVersion.notes || []).map(note =>
+        isNoteData(note) ? note : { text: String(note), human_verified: false }
+      );
+      let updatedSubcategories = (currentVersion.subcategories || []).map(sub =>
+        isSubcategoryData(sub) ? sub : { name: String(sub), content: '', examples: [] }
+      );
+      let updatedExamples = (currentVersion.examples || []).map(ex =>
+        isExampleData(ex)
+          ? { source_text: getExampleSourceText(ex), english: ex.english, analysis: ex.analysis, human_verified: ex.human_verified }
+          : { source_text: String(ex), english: '', analysis: '', human_verified: false }
+      );
+
+      if (editModal.type === 'note') {
+        updatedNotes = [...updatedNotes];
+        updatedNotes[editModal.index] = editModal.value as NoteData;
+      } else if (editModal.type === 'subcategory') {
+        updatedSubcategories = [...updatedSubcategories];
+        updatedSubcategories[editModal.index] = editModal.value as SubcategoryData;
+      } else if (editModal.type === 'example') {
+        updatedExamples = [...updatedExamples];
+        updatedExamples[editModal.index] = editModal.value as ExampleData;
+      }
+
+      // Save to backend
+      await saveGrammarCategory(languageCode, selectedCategory.name, {
+        notes: updatedNotes,
+        subcategories: updatedSubcategories,
+        examples: updatedExamples
+      });
+
+      // Reload to get fresh data
+      const updatedCategories = await fetchGrammarCategories(languageCode);
+      setCategories(updatedCategories.categories);
+      const updated = updatedCategories.categories.find(c => c.name === selectedCategory.name);
+      if (updated) {
+        setSelectedCategory(updated);
+      }
+
+      setEditModal(null);
+    } catch (err) {
+      console.error('Failed to save item:', err);
+    } finally {
+      setModalSaving(false);
+    }
+  };
+
+  // Get current category data
+  const getCurrentVersion = (): MergedGrammarCategory | undefined => {
+    return selectedCategory ?? undefined;
+  };
+
+  // Filtered content for detail view search
+  const filteredContent = useMemo(() => {
+    if (!selectedCategory) {
+      return {
+        subcategories: [] as IndexedItem<SubcategoryItem>[],
+        notes: [] as IndexedItem<NoteItem>[],
+        examples: [] as IndexedItem<ExampleItem>[],
+        hasResults: false,
+      };
+    }
+    const subcategories = filterSubcategories(selectedCategory.subcategories || [], searchQuery);
+    const notes = filterNotes(selectedCategory.notes || [], searchQuery);
+    const examples = filterExamples(selectedCategory.examples || [], searchQuery);
+    return {
+      subcategories, notes, examples,
+      hasResults: subcategories.length > 0 || notes.length > 0 || examples.length > 0,
+    };
+  }, [selectedCategory, searchQuery]);
+
+  // Filtered categories for top-level grid search
+  const filteredCategories = useMemo(
+    () => filterCategoryByContent(categories, searchQuery),
+    [categories, searchQuery]
+  );
 
   // Format category name for display
   const formatCategoryName = (name: string): string => {
@@ -279,83 +590,87 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
 
   // Render category grid
   const renderCategoryGrid = () => (
-    <Grid container spacing={2}>
-      {categories.map((category) => {
-        const config = CATEGORY_CONFIG[category.name] || {
-          icon: <Psychology />,
-          color: '#9E9E9E',
-          description: category.name
-        };
-        const hasContent = category.human || category.ai;
-        const isVerified = category.human?.human_verified || category.ai?.human_verified;
+    <>
+      <TextField
+        fullWidth
+        placeholder="Search grammar..."
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        sx={{
+          mb: 2,
+          '& .MuiOutlinedInput-root': {
+            bgcolor: 'rgba(255,255,255,0.05)',
+            '& fieldset': { borderColor: 'rgba(255,255,255,0.2)' },
+            '&:hover fieldset': { borderColor: 'rgba(255,255,255,0.4)' },
+          },
+          '& .MuiInputBase-input': { color: 'white' }
+        }}
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <Search sx={{ color: 'rgba(255,255,255,0.5)' }} />
+            </InputAdornment>
+          )
+        }}
+      />
+      <Grid container spacing={2}>
+        {filteredCategories.map((category) => {
+          const config = CATEGORY_CONFIG[category.name] || {
+            icon: <Psychology />,
+            color: '#9E9E9E',
+            description: category.name
+          };
+          const hasContent = !!(category.description || (category.subcategories?.length ?? 0) > 0 || (category.notes?.length ?? 0) > 0 || (category.examples?.length ?? 0) > 0);
+          const isVerified = category.human_verified;
 
-        return (
-          <Grid item xs={12} sm={6} md={4} key={category.name}>
-            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-              <Card
-                sx={{
-                  bgcolor: 'rgba(255,255,255,0.05)',
-                  borderLeft: `4px solid ${config.color}`,
-                  cursor: 'pointer',
-                  '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' }
-                }}
-              >
-                <CardActionArea onClick={() => handleSelectCategory(category)}>
-                  <CardContent>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                      <Box sx={{ color: config.color, mr: 1 }}>
-                        {config.icon}
+          return (
+            <Grid item xs={12} sm={6} md={4} key={category.name}>
+              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <Card
+                  sx={{
+                    bgcolor: 'rgba(255,255,255,0.05)',
+                    borderLeft: `4px solid ${config.color}`,
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' }
+                  }}
+                >
+                  <CardActionArea onClick={() => handleSelectCategory(category)}>
+                    <CardContent>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                        <Box sx={{ color: config.color, mr: 1 }}>
+                          {config.icon}
+                        </Box>
+                        <Typography variant="h6" sx={{ color: 'white', flexGrow: 1 }}>
+                          {formatCategoryName(category.name)}
+                        </Typography>
                       </Box>
-                      <Typography variant="h6" sx={{ color: 'white', flexGrow: 1 }}>
-                        {formatCategoryName(category.name)}
+                      <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.6)', mb: 1 }}>
+                        {config.description}
                       </Typography>
-                      {isVerified && (
-                        <CheckCircle sx={{ color: '#4CAF50', fontSize: 20 }} />
-                      )}
-                    </Box>
-                    <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.6)', mb: 1 }}>
-                      {config.description}
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 0.5 }}>
-                      {category.human && (
-                        <Chip
-                          size="small"
-                          icon={<Person sx={{ fontSize: 14 }} />}
-                          label="Human"
-                          sx={{ bgcolor: 'rgba(33,150,243,0.3)', color: 'white', fontSize: '0.7rem' }}
-                        />
-                      )}
-                      {category.ai && (
-                        <Chip
-                          size="small"
-                          icon={<SmartToy sx={{ fontSize: 14 }} />}
-                          label="AI"
-                          sx={{ bgcolor: 'rgba(255,152,0,0.3)', color: 'white', fontSize: '0.7rem' }}
-                        />
-                      )}
-                      {!hasContent && (
-                        <Chip
-                          size="small"
-                          label="Empty"
-                          sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)', fontSize: '0.7rem' }}
-                        />
-                      )}
-                    </Box>
-                  </CardContent>
-                </CardActionArea>
-              </Card>
-            </motion.div>
-          </Grid>
-        );
-      })}
-    </Grid>
+                    </CardContent>
+                  </CardActionArea>
+                </Card>
+              </motion.div>
+            </Grid>
+          );
+        })}
+      </Grid>
+      {filteredCategories.length === 0 && searchQuery.trim() && (
+        <Typography
+          align="center"
+          sx={{ color: 'rgba(255,255,255,0.5)', fontStyle: 'italic', py: 4 }}
+        >
+          No grammar content matches &ldquo;{searchQuery}&rdquo;
+        </Typography>
+      )}
+    </>
   );
 
   // Render detail view
   const renderDetail = () => {
     const currentVersion = getCurrentVersion();
-    const hasBothVersions = selectedCategory?.human && selectedCategory?.ai;
     const config = selectedCategory ? CATEGORY_CONFIG[selectedCategory.name] : null;
+    const hasContent = !!(currentVersion?.description || (currentVersion?.subcategories?.length ?? 0) > 0 || (currentVersion?.notes?.length ?? 0) > 0 || (currentVersion?.examples?.length ?? 0) > 0);
 
     return (
       <Box>
@@ -378,57 +693,9 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
 
         <Divider sx={{ mb: 2, bgcolor: 'rgba(255,255,255,0.2)' }} />
 
-        {/* Tabs if both versions exist */}
-        {hasBothVersions && (
-          <Tabs
-            value={activeTab}
-            onChange={handleTabChange}
-            sx={{ mb: 2, borderBottom: 1, borderColor: 'rgba(255,255,255,0.2)' }}
-          >
-            <Tab
-              value="human"
-              label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Person fontSize="small" />
-                  Human
-                  {selectedCategory?.human?.human_verified && (
-                    <CheckCircle sx={{ fontSize: 16, color: '#4CAF50' }} />
-                  )}
-                </Box>
-              }
-              sx={{ color: 'white', '&.Mui-selected': { color: '#2196F3' } }}
-            />
-            <Tab
-              value="ai"
-              label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <SmartToy fontSize="small" />
-                  AI
-                  {selectedCategory?.ai?.human_verified && (
-                    <CheckCircle sx={{ fontSize: 16, color: '#4CAF50' }} />
-                  )}
-                </Box>
-              }
-              sx={{ color: 'white', '&.Mui-selected': { color: '#FF9800' } }}
-            />
-          </Tabs>
-        )}
-
-        {/* Source badge if only one version */}
-        {!hasBothVersions && currentVersion && (
-          <Chip
-            icon={activeTab === 'human' ? <Person /> : <SmartToy />}
-            label={activeTab === 'human' ? 'Human Content' : 'AI Content'}
-            sx={{
-              mb: 2,
-              bgcolor: activeTab === 'human' ? 'rgba(33,150,243,0.3)' : 'rgba(255,152,0,0.3)',
-              color: 'white'
-            }}
-          />
-        )}
 
         {/* Empty state - no human or AI content */}
-        {!hasBothVersions && !currentVersion && !isEditing && (
+        {!hasContent && !isEditing && (
           <Box sx={{ textAlign: 'center', py: 6 }}>
             <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.7)', mb: 2 }}>
               No content yet for {formatCategoryName(selectedCategory?.name || '')}
@@ -448,7 +715,7 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
         )}
 
         {isEditing ? (
-          // Edit form
+          // Edit form with rich structured editors
           <Box>
             {/* Show "New Content" badge when creating from empty state */}
             {!currentVersion && (
@@ -458,32 +725,71 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
                 sx={{ mb: 2, bgcolor: 'rgba(33,150,243,0.3)', color: 'white' }}
               />
             )}
+
+            {/* Notes Section */}
             <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.7)', mb: 1 }}>
               Notes (one per line)
             </Typography>
             <TextField
               fullWidth
-              value={editForm.notes}
-              onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
+              value={editForm.notes.map(n => n.text).join('\n')}
+              onChange={(e) => setEditForm(prev => ({
+                ...prev,
+                notes: e.target.value.split('\n').map(text => ({ text, human_verified: false }))
+              }))}
               multiline
-              rows={6}
+              rows={4}
               placeholder="Enter grammar notes..."
               sx={{ mb: 3 }}
               InputProps={{ sx: { color: 'white', bgcolor: 'rgba(255,255,255,0.05)' } }}
             />
 
+            {/* Subcategories Section */}
             <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.7)', mb: 1 }}>
-              Examples (one per line)
+              Subcategories
             </Typography>
+            <Box sx={{ mb: 3 }}>
+              <NestedItemEditor
+                items={editForm.subcategories}
+                onChange={subcats => setEditForm(prev => ({ ...prev, subcategories: subcats }))}
+                fields={[
+                  { name: 'name', label: 'Name', multiline: false },
+                  { name: 'content', label: 'Content', multiline: true, rows: 4 },
+                  { name: 'examples', label: 'Examples (one per line)', multiline: true, rows: 3, isArray: true }
+                ]}
+                addLabel="Add Subcategory"
+                emptyItem={{ name: '', content: '', examples: [] }}
+              />
+            </Box>
+
+            {/* Examples Section */}
+            <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.7)', mb: 1 }}>
+              Examples
+            </Typography>
+            <Box sx={{ mb: 3 }}>
+              <NestedItemEditor
+                items={editForm.examples}
+                onChange={exs => setEditForm(prev => ({ ...prev, examples: exs }))}
+                fields={[
+                  { name: 'source_text', label: languageName, multiline: true, rows: 2 },
+                  { name: 'english', label: 'English', multiline: true, rows: 2 },
+                  { name: 'analysis', label: 'Analysis', multiline: true, rows: 2 }
+                ]}
+                addLabel="Add Example"
+                emptyItem={{ source_text: '', english: '', analysis: '' }}
+              />
+            </Box>
+
             <TextField
               fullWidth
-              value={editForm.examples}
-              onChange={(e) => setEditForm(prev => ({ ...prev, examples: e.target.value }))}
               multiline
-              rows={4}
-              placeholder="Enter examples..."
-              sx={{ mb: 3 }}
+              rows={2}
+              label="Optional: describe the correction"
+              value={correctionNote}
+              onChange={(e) => setCorrectionNote(e.target.value)}
+              sx={{ mb: 2 }}
               InputProps={{ sx: { color: 'white', bgcolor: 'rgba(255,255,255,0.05)' } }}
+              InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.5)' } }}
             />
 
             <Box sx={{ display: 'flex', gap: 2 }}>
@@ -510,22 +816,52 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
           // Display view (only when there's content)
           <Box>
             {/* Subcategories */}
-            {currentVersion?.subcategories && currentVersion.subcategories.length > 0 && (
+            {filteredContent.subcategories.length > 0 && (
               <>
                 <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.7)', mb: 1 }}>
                   Subcategories
                 </Typography>
                 {/* Check if subcategories are rich objects (AI) or simple strings (human) */}
-                {currentVersion.subcategories.some(isSubcategoryData) ? (
+                {filteredContent.subcategories.some(({ item }) => isSubcategoryData(item)) ? (
                   // Rich format: render as expandable sections
                   <Box sx={{ mb: 3 }}>
-                    {currentVersion.subcategories.map((sub, i) => {
+                    {filteredContent.subcategories.map(({ item: sub, originalIndex }) => {
                       if (isSubcategoryData(sub)) {
+                        const isVerified = sub.human_verified ?? false;
                         return (
-                          <Box key={i} sx={{ mb: 2, p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 1 }}>
-                            <Typography variant="subtitle1" sx={{ color: 'white', fontWeight: 'bold', mb: 1 }}>
-                              {sub.name.replace(/_/g, ' ')}
-                            </Typography>
+                          <Box key={originalIndex} sx={{ mb: 2, p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 1 }}>
+                            {/* Header with name, edit and verify buttons */}
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                              <Typography variant="subtitle1" sx={{ color: 'white', fontWeight: 'bold' }}>
+                                {sub.name.replace(/_/g, ' ')}
+                              </Typography>
+                              <Box sx={{ display: 'flex', gap: 1 }}>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleOpenEditModal('subcategory', originalIndex, sub)}
+                                  sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: 'white' } }}
+                                >
+                                  <Edit fontSize="small" />
+                                </IconButton>
+                                <CopyIconButton
+                                  text={[sub.name.replace(/_/g, ' '), '', sub.content, ...(sub.examples?.length ? ['', ...sub.examples] : [])].join('\n').trim()}
+                                />
+                                <Button
+                                  size="small"
+                                  variant={isVerified ? 'contained' : 'outlined'}
+                                  startIcon={isVerified ? <CheckCircle /> : <CheckCircleOutline />}
+                                  onClick={() => handleSubcategoryVerify(originalIndex, isVerified)}
+                                  color={isVerified ? 'success' : 'inherit'}
+                                  sx={!isVerified ? {
+                                    color: 'rgba(255,255,255,0.7)',
+                                    borderColor: 'rgba(255,255,255,0.3)',
+                                    '&:hover': { borderColor: 'rgba(255,255,255,0.5)' }
+                                  } : {}}
+                                >
+                                  {isVerified ? 'Verified' : 'Verify'}
+                                </Button>
+                              </Box>
+                            </Box>
                             <Typography sx={{ color: 'rgba(255,255,255,0.8)', mb: 1 }}>
                               {sub.content}
                             </Typography>
@@ -544,7 +880,7 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
                       // Fallback for mixed arrays
                       return (
                         <Chip
-                          key={i}
+                          key={originalIndex}
                           label={getSubcategoryLabel(sub)}
                           size="small"
                           sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white', mr: 1, mb: 1 }}
@@ -555,9 +891,9 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
                 ) : (
                   // Simple format: render as chips
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 3 }}>
-                    {currentVersion.subcategories.map((sub, i) => (
+                    {filteredContent.subcategories.map(({ item: sub, originalIndex }) => (
                       <Chip
-                        key={i}
+                        key={originalIndex}
                         label={getSubcategoryLabel(sub)}
                         size="small"
                         sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white' }}
@@ -572,15 +908,46 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
             <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.7)', mb: 1 }}>
               Notes
             </Typography>
-            {currentVersion?.notes && currentVersion.notes.length > 0 ? (
-              <Box component="ul" sx={{ color: 'white', pl: 2, mb: 3 }}>
-                {currentVersion.notes.map((note, i) => (
-                  <li key={i} style={{ marginBottom: '0.5rem' }}>{note}</li>
-                ))}
+            {filteredContent.notes.length > 0 ? (
+              <Box sx={{ mb: 3 }}>
+                {filteredContent.notes.map(({ item: note, originalIndex }) => {
+                  const noteText = getNoteText(note);
+                  const isVerified = isNoteData(note) ? (note.human_verified ?? false) : false;
+                  return (
+                    <Box key={originalIndex} sx={{ mb: 1.5, p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 1 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <Typography sx={{ color: 'white', flex: 1 }}>{noteText}</Typography>
+                        <Box sx={{ display: 'flex', gap: 1, ml: 1, flexShrink: 0 }}>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleOpenEditModal('note', originalIndex, note)}
+                            sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: 'white' } }}
+                          >
+                            <Edit fontSize="small" />
+                          </IconButton>
+                          <Button
+                            size="small"
+                            variant={isVerified ? 'contained' : 'outlined'}
+                            startIcon={isVerified ? <CheckCircle /> : <CheckCircleOutline />}
+                            onClick={() => handleNoteVerify(originalIndex, isVerified)}
+                            color={isVerified ? 'success' : 'inherit'}
+                            sx={!isVerified ? {
+                              color: 'rgba(255,255,255,0.7)',
+                              borderColor: 'rgba(255,255,255,0.3)',
+                              '&:hover': { borderColor: 'rgba(255,255,255,0.5)' }
+                            } : {}}
+                          >
+                            {isVerified ? 'Verified' : 'Verify'}
+                          </Button>
+                        </Box>
+                      </Box>
+                    </Box>
+                  );
+                })}
               </Box>
             ) : (
               <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontStyle: 'italic', mb: 3 }}>
-                No notes yet
+                {searchQuery.trim() ? `No notes matching "${searchQuery}"` : 'No notes yet'}
               </Typography>
             )}
 
@@ -588,80 +955,139 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
             <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.7)', mb: 1 }}>
               Examples
             </Typography>
-            {currentVersion?.examples && currentVersion.examples.length > 0 ? (
-              currentVersion.examples.some(isExampleData) ? (
+            {filteredContent.examples.length > 0 ? (
+              filteredContent.examples.some(({ item }) => isExampleData(item)) ? (
                 // Rich format: render structured examples (AI-generated)
                 <Box sx={{ mb: 3 }}>
-                  {currentVersion.examples.map((ex, i) => {
+                  {filteredContent.examples.map(({ item: ex, originalIndex }) => {
                     if (isExampleData(ex)) {
+                      const isVerified = ex.human_verified ?? false;
+                      const exampleData: ExampleData = {
+                        source_text: getExampleSourceText(ex),
+                        english: ex.english,
+                        analysis: ex.analysis,
+                        human_verified: isVerified
+                      };
                       return (
-                        <Box key={i} sx={{ mb: 2, p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 1 }}>
-                          <Typography sx={{ color: 'white', fontWeight: 'bold' }}>
-                            {ex.bughotu}
-                          </Typography>
-                          <Typography sx={{ color: 'rgba(255,255,255,0.8)' }}>
-                            {ex.english}
-                          </Typography>
-                          {ex.analysis && (
-                            <Typography sx={{ color: 'rgba(255,255,255,0.6)', fontStyle: 'italic', fontSize: '0.9rem', mt: 0.5 }}>
-                              {ex.analysis}
-                            </Typography>
-                          )}
+                        <Box key={originalIndex} sx={{ mb: 2, p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 1 }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <Box sx={{ flex: 1 }}>
+                              <Typography sx={{ color: 'white', fontWeight: 'bold' }}>
+                                {getExampleSourceText(ex)}
+                              </Typography>
+                              <Typography sx={{ color: 'rgba(255,255,255,0.8)' }}>
+                                {ex.english}
+                              </Typography>
+                              {ex.analysis && (
+                                <Typography sx={{ color: 'rgba(255,255,255,0.6)', fontStyle: 'italic', fontSize: '0.9rem', mt: 0.5 }}>
+                                  {ex.analysis}
+                                </Typography>
+                              )}
+                            </Box>
+                            <Box sx={{ display: 'flex', gap: 1, ml: 1, flexShrink: 0 }}>
+                              <IconButton
+                                size="small"
+                                onClick={() => handleOpenEditModal('example', originalIndex, exampleData)}
+                                sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: 'white' } }}
+                              >
+                                <Edit fontSize="small" />
+                              </IconButton>
+                              <Button
+                                size="small"
+                                variant={isVerified ? 'contained' : 'outlined'}
+                                startIcon={isVerified ? <CheckCircle /> : <CheckCircleOutline />}
+                                onClick={() => handleExampleVerify(originalIndex, isVerified)}
+                                color={isVerified ? 'success' : 'inherit'}
+                                sx={!isVerified ? {
+                                  color: 'rgba(255,255,255,0.7)',
+                                  borderColor: 'rgba(255,255,255,0.3)',
+                                  '&:hover': { borderColor: 'rgba(255,255,255,0.5)' }
+                                } : {}}
+                              >
+                                {isVerified ? 'Verified' : 'Verify'}
+                              </Button>
+                            </Box>
+                          </Box>
                         </Box>
                       );
                     }
-                    // Fallback for mixed arrays
+                    // Fallback for simple string examples - still show verify button
                     return (
-                      <li key={i} style={{ marginBottom: '0.5rem', color: 'white' }}>{String(ex)}</li>
+                      <Box key={originalIndex} sx={{ mb: 1.5, p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 1 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <Typography sx={{ color: 'white', flex: 1 }}>{String(ex)}</Typography>
+                          <Box sx={{ display: 'flex', gap: 1, ml: 1, flexShrink: 0 }}>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleOpenEditModal('example', originalIndex, { source_text: String(ex), english: '', analysis: '', human_verified: false })}
+                              sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: 'white' } }}
+                            >
+                              <Edit fontSize="small" />
+                            </IconButton>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<CheckCircleOutline />}
+                              onClick={() => handleExampleVerify(originalIndex, false)}
+                              sx={{
+                                color: 'rgba(255,255,255,0.7)',
+                                borderColor: 'rgba(255,255,255,0.3)',
+                                '&:hover': { borderColor: 'rgba(255,255,255,0.5)' }
+                              }}
+                            >
+                              Verify
+                            </Button>
+                          </Box>
+                        </Box>
+                      </Box>
                     );
                   })}
                 </Box>
               ) : (
-                // Simple format: render as list items (human-entered)
-                <Box component="ul" sx={{ color: 'white', pl: 2, mb: 3 }}>
-                  {currentVersion.examples.map((ex, i) => (
-                    <li key={i} style={{ marginBottom: '0.5rem' }}>{String(ex)}</li>
+                // Simple format: render as cards with edit and verify (human-entered)
+                <Box sx={{ mb: 3 }}>
+                  {filteredContent.examples.map(({ item: ex, originalIndex }) => (
+                    <Box key={originalIndex} sx={{ mb: 1.5, p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 1 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <Typography sx={{ color: 'white', flex: 1 }}>{String(ex)}</Typography>
+                        <Box sx={{ display: 'flex', gap: 1, ml: 1, flexShrink: 0 }}>
+                          <IconButton
+                            size="small"
+                            onClick={() => handleOpenEditModal('example', originalIndex, { source_text: String(ex), english: '', analysis: '', human_verified: false })}
+                            sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: 'white' } }}
+                          >
+                            <Edit fontSize="small" />
+                          </IconButton>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<CheckCircleOutline />}
+                            onClick={() => handleExampleVerify(originalIndex, false)}
+                            sx={{
+                              color: 'rgba(255,255,255,0.7)',
+                              borderColor: 'rgba(255,255,255,0.3)',
+                              '&:hover': { borderColor: 'rgba(255,255,255,0.5)' }
+                            }}
+                          >
+                            Verify
+                          </Button>
+                        </Box>
+                      </Box>
+                    </Box>
                   ))}
                 </Box>
               )
             ) : (
               <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontStyle: 'italic', mb: 3 }}>
-                No examples yet
+                {searchQuery.trim() ? `No examples matching "${searchQuery}"` : 'No examples yet'}
               </Typography>
             )}
 
-            <Divider sx={{ my: 3, bgcolor: 'rgba(255,255,255,0.2)' }} />
-
-            {/* Action buttons */}
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-              <Button
-                variant="outlined"
-                startIcon={<Edit />}
-                onClick={handleStartEdit}
-                disabled={hasRichData(currentVersion)}
-                sx={{
-                  color: hasRichData(currentVersion) ? 'rgba(255,255,255,0.3)' : 'white',
-                  borderColor: 'rgba(255,255,255,0.3)'
-                }}
-              >
-                Edit
-              </Button>
-              {hasRichData(currentVersion) && (
-                <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.85rem', fontStyle: 'italic' }}>
-                  Rich AI content is read-only
-                </Typography>
-              )}
-              <Button
-                variant={currentVersion?.human_verified ? 'contained' : 'outlined'}
-                startIcon={currentVersion?.human_verified ? <CheckCircle /> : <CheckCircleOutline />}
-                onClick={handleVerify}
-                color={currentVersion?.human_verified ? 'success' : 'inherit'}
-                sx={!currentVersion?.human_verified ? { color: 'white', borderColor: 'rgba(255,255,255,0.3)' } : {}}
-                disabled={!currentVersion}
-              >
-                {currentVersion?.human_verified ? 'Verified' : 'Verify'}
-              </Button>
-            </Box>
+            {searchQuery.trim() && !filteredContent.hasResults && (
+              <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontStyle: 'italic', textAlign: 'center', py: 4 }}>
+                No content matching &ldquo;{searchQuery}&rdquo;
+              </Typography>
+            )}
           </Box>
         ) : null}
       </Box>
@@ -671,28 +1097,33 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
   return (
     <Box
       sx={{
-        minHeight: '100vh',
+        height: embeddedMode ? '100%' : '100vh',
+        overflow: 'hidden',
         background: 'linear-gradient(135deg, #1A1A1A, #2D2D2D)',
-        pt: 7,  // 56px to clear fixed TopBar (48px)
+        pt: embeddedMode ? 0 : `${TOPBAR_HEIGHT + 8}px`,
         pb: 4,
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
-      <Container maxWidth="lg">
-        {/* Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-          <IconButton onClick={handleBack} sx={{ mr: 2, color: 'white' }}>
-            <ArrowBack />
-          </IconButton>
-          <Typography variant="h4" component="h1" sx={{ color: 'white', flexGrow: 1 }}>
-            {view === 'detail' && selectedCategory
-              ? `Grammar - ${formatCategoryName(selectedCategory.name)}`
-              : 'Grammar System'}
-          </Typography>
-          <Chip
-            label={languageName}
-            sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white' }}
-          />
-        </Box>
+      <Container maxWidth="lg" sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        {/* Header — hidden in embedded mode (parent owns AppBar) */}
+        {!embeddedMode && (
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, flexShrink: 0 }}>
+            <IconButton onClick={handleBack} sx={{ mr: 2, color: 'white' }}>
+              <ArrowBack />
+            </IconButton>
+            <Typography variant="h4" component="h1" sx={{ color: 'white', flexGrow: 1 }}>
+              {view === 'detail' && selectedCategory
+                ? `Grammar - ${formatCategoryName(selectedCategory.name)}`
+                : 'Grammar System'}
+            </Typography>
+            <Chip
+              label={languageName}
+              sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white' }}
+            />
+          </Box>
+        )}
 
         {/* Content */}
         {loading ? (
@@ -709,12 +1140,150 @@ export function GrammarViewer({ languageCode, languageName, onBack }: GrammarVie
             </Box>
           </Paper>
         ) : (
-          <Paper elevation={3} sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)' }}>
+          <Paper elevation={3} sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
             {view === 'categories' && renderCategoryGrid()}
             {view === 'detail' && renderDetail()}
           </Paper>
         )}
       </Container>
+
+      {/* Edit Item Modal */}
+      <Dialog
+        open={!!editModal}
+        onClose={handleCloseEditModal}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: '#2D2D2D',
+            color: 'white'
+          }
+        }}
+      >
+        <DialogTitle>
+          {editModal?.type === 'subcategory' && 'Edit Subcategory'}
+          {editModal?.type === 'note' && 'Edit Note'}
+          {editModal?.type === 'example' && 'Edit Example'}
+        </DialogTitle>
+        <DialogContent>
+          {editModal?.type === 'note' && (
+            <TextField
+              fullWidth
+              multiline
+              rows={4}
+              value={(editModal.value as NoteData).text || ''}
+              onChange={(e) => setEditModal(prev => prev ? {
+                ...prev,
+                value: { ...(prev.value as NoteData), text: e.target.value }
+              } : null)}
+              placeholder="Enter note..."
+              sx={{ mt: 1 }}
+              InputProps={{ sx: { color: 'white', bgcolor: 'rgba(255,255,255,0.05)' } }}
+            />
+          )}
+          {editModal?.type === 'subcategory' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+              <TextField
+                label="Name"
+                fullWidth
+                value={(editModal.value as SubcategoryData).name || ''}
+                onChange={(e) => setEditModal(prev => prev ? {
+                  ...prev,
+                  value: { ...(prev.value as SubcategoryData), name: e.target.value }
+                } : null)}
+                InputProps={{ sx: { color: 'white' } }}
+                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.5)' } }}
+              />
+              <TextField
+                label="Content"
+                fullWidth
+                multiline
+                rows={4}
+                value={(editModal.value as SubcategoryData).content || ''}
+                onChange={(e) => setEditModal(prev => prev ? {
+                  ...prev,
+                  value: { ...(prev.value as SubcategoryData), content: e.target.value }
+                } : null)}
+                InputProps={{ sx: { color: 'white' } }}
+                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.5)' } }}
+              />
+              <TextField
+                label="Examples (one per line)"
+                fullWidth
+                multiline
+                rows={3}
+                value={((editModal.value as SubcategoryData).examples || []).join('\n')}
+                onChange={(e) => setEditModal(prev => prev ? {
+                  ...prev,
+                  value: { ...(prev.value as SubcategoryData), examples: e.target.value.split('\n').filter(s => s.trim()) }
+                } : null)}
+                InputProps={{ sx: { color: 'white' } }}
+                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.5)' } }}
+              />
+            </Box>
+          )}
+          {editModal?.type === 'example' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+              <TextField
+                label={languageName}
+                fullWidth
+                multiline
+                rows={2}
+                value={(editModal.value as ExampleData).source_text || ''}
+                onChange={(e) => setEditModal(prev => prev ? {
+                  ...prev,
+                  value: { ...(prev.value as ExampleData), source_text: e.target.value }
+                } : null)}
+                InputProps={{ sx: { color: 'white' } }}
+                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.5)' } }}
+              />
+              <TextField
+                label="English"
+                fullWidth
+                multiline
+                rows={2}
+                value={(editModal.value as ExampleData).english || ''}
+                onChange={(e) => setEditModal(prev => prev ? {
+                  ...prev,
+                  value: { ...(prev.value as ExampleData), english: e.target.value }
+                } : null)}
+                InputProps={{ sx: { color: 'white' } }}
+                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.5)' } }}
+              />
+              <TextField
+                label="Analysis"
+                fullWidth
+                multiline
+                rows={2}
+                value={(editModal.value as ExampleData).analysis || ''}
+                onChange={(e) => setEditModal(prev => prev ? {
+                  ...prev,
+                  value: { ...(prev.value as ExampleData), analysis: e.target.value }
+                } : null)}
+                InputProps={{ sx: { color: 'white' } }}
+                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.5)' } }}
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button
+            onClick={handleCloseEditModal}
+            sx={{ color: 'rgba(255,255,255,0.7)' }}
+            disabled={modalSaving}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleSaveEditModal}
+            disabled={modalSaving}
+            startIcon={modalSaving ? <CircularProgress size={16} /> : <Save />}
+          >
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

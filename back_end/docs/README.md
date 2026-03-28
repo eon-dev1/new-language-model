@@ -4,21 +4,21 @@
 
 The NLM (New Language Model) Backend is a FastAPI-based REST API that powers a Bible translation management platform. It provides services for managing multilingual Bible translations, dictionaries, and grammar systems with support for both human-curated and AI-generated content.
 
-**Status**: MongoDB migration in progress (transitioning from PostgreSQL)
+**Status**: Active development (MongoDB backend)
 
 ## Key Features
 
-- **Dual-Level Translation Model**: Each non-English language supports both human and AI-generated versions of:
-  - Bible texts
-  - Dictionaries
-  - Grammar systems
-- **MongoDB Atlas Integration**: Async database operations via Motor driver
+- **Single-Document Model**: Each entity (verse, dictionary, grammar system, bible book) has one document per language. Verification status is tracked via `human_verified: bool` rather than separate document sets.
+- **MongoDB Integration**: Async database operations via Motor driver
 - **Localhost-Only Binding**: Server binds to 127.0.0.1 for security (no external network exposure)
 - **Comprehensive Bible Structure**: Full 66-book Bible framework with accurate chapter/verse counts
 
 **Note**: API authentication has been disabled for local development. MongoDB provides its own authentication layer.
 
 ## Quick Start
+
+## Start server 
+~/.nlm/bin/mongod --port 27019 --dbpath ~/.nlm/db
 
 ### Prerequisites
 
@@ -52,13 +52,6 @@ DATABASE_NAME="nlm_db"
 2. Create your credentials file at the path specified above:
 ```env
 MONGODB_CONNECTION_STRING="mongodb+srv://user:password@cluster.mongodb.net/"
-# FAST_API_KEY not required - authentication disabled for local development
-```
-
-3. Create `fastapi.env` in the backend root:
-```env
-CREDENTIALS_PATH="/path/to/your/credentials.env"
-FAST_API_PORT=8221
 ```
 
 ### Running the Server
@@ -86,7 +79,7 @@ pytest -v
 pytest tests/unit/db_connector/test_mongodb_connection.py
 
 # Run specific test by name
-pytest -k "test_settings_loading"
+pytest -k "test_settings_creation_succeeds"
 ```
 
 ## Directory Structure
@@ -95,57 +88,63 @@ pytest -k "test_settings_loading"
 back_end/
 |-- main.py                     # FastAPI application entry point
 |-- pytest.ini                  # pytest configuration
-|-- fastapi.env                 # Server configuration (port, credentials path)
-|
-|-- config/                     # Configuration classes
-|   |-- mongodb.py              # MongoDB settings (local + Atlas support)
-|   |-- atlas.py                # Atlas-specific settings with mem0 integration
+|-- requirements.txt            # Python dependencies
 |
 |-- db_connector/               # Database connection layer
 |   |-- connection.py           # MongoDBConnector class (Motor async driver)
 |   |-- settings.py             # Two-tier credential loading system
 |   |-- mongo_credentials_path.env  # Tier 1: path to actual credentials
-|   |-- repositories/           # Data access layer (in development)
 |
-|-- routes/                     # API endpoint handlers
-|   |-- new_language.py         # Language creation with dual-level support
+|-- routes/                     # API endpoint handlers (20 route modules)
+|   |-- dependencies.py         # Shared get_db() dependency injection
+|   |-- new_language.py         # Language creation
+|   |-- languages.py            # Language listing
+|   |-- bible_books.py          # Bible book structure
+|   |-- check_connection.py     # Health check
+|   |-- import_bible.py         # USFM import
+|   |-- import_html_bible.py    # HTML import
+|   |-- ...                     # (and more)
+|
+|-- mcp_server/                 # MCP server for Claude tool access
 |
 |-- utils/                      # Utility modules
 |   |-- bible_generator/        # Bible structure data and collection management
 |   |   |-- chapter_verse_numbers.py  # Complete Bible chapter/verse data
-|   |   |-- bible_collection_manager.py  # Abstract base for Bible repos
-|   |-- grammar_generator/      # Grammar table generation (PostgreSQL legacy)
+|   |   |-- bible_collection_manager.py  # Abstract base for Bible collection managers
 |   |-- usfm_parser/            # USFM Bible format parser and importer
-|
-|-- inference/                  # LLM service interfaces
-|   |-- interfaces.py           # Abstract base classes for LLM integration
+|   |-- html_parser/            # HTML Bible format parser and importer
+|   |-- schema_enforcer/        # MongoDB schema validation
+|   |-- word_index/             # Word frequency tracking
 |
 |-- tests/                      # Test suite
 |   |-- unit/db_connector/      # MongoDB connection tests
-|   |-- test_usfm_*.py          # USFM parser tests
+|   |-- unit/routes/            # Route handler tests
+|   |-- unit/mcp_server/        # MCP server tests
+|   |-- integration/            # Integration tests
+|   |-- test_usfm_parser.py     # USFM parser tests
+|   |-- test_html_parser.py     # HTML parser tests
 ```
 
 ## Core Concepts
 
-### Dual-Level Translation Model
+### Single-Document Model
 
-Non-English languages maintain parallel content sets:
+Each language has one document per entity — one dictionary, one grammar system, 66 bible_books documents (one per book). Verification state is tracked with `human_verified: bool` on individual items (verses, dictionary entries, grammar categories). There is no separate "human" vs "AI" document set.
 
-| Content Type | Human Version | AI Version |
-|-------------|---------------|------------|
-| Bible Texts | Human-translated | LLM-generated |
-| Dictionary | Human-curated | NLM-generated |
-| Grammar System | Human-documented | NLM-generated |
-
-English serves as the base language with only human-level content (no AI version).
+English is the base language (`is_base_language: true`). Its verses use `english_text`; all other languages use `translated_text`.
 
 ### MongoDB Collections
 
 - `languages` - Language metadata and translation progress
+- `base_structure_bible` - Canonical Bible structure (generator scripts)
 - `bible_books` - Book structure with chapters and verses
 - `bible_texts` - Individual verse storage
 - `dictionaries` - Word entries with definitions
 - `grammar_systems` - Grammar rules by category
+- `word_index` - Word frequency and dictionary gap tracking
+- `language_notes` - Per-language notes and observations
+- `correction_log` - Edit history for translations, dictionary, grammar
+- `chat_conversations` - AI chat conversation history
 
 ### Authentication
 
@@ -173,74 +172,31 @@ See [api.md](./api.md) for detailed API documentation.
 
 - [Architecture Guide](./architecture.md) - System design and patterns
 - [API Reference](./api.md) - Complete endpoint documentation
+- [Chat & AI System](./chat-system.md) - LLM integration, tool loop, SSE protocol, batch translation
 - [Database Schema](./database.md) - MongoDB collection schemas
 - [Configuration Guide](./configuration.md) - Environment setup
 - [Developer Guide](./development.md) - Development workflow
 
 ## Technology Stack
 
-- **FastAPI 0.115.12** - Async web framework
-- **Uvicorn 0.34.3** - ASGI server
-- **Motor 3.x** - Async MongoDB driver
-- **Pydantic** - Data validation and settings
-- **pytest 8.4.1** - Testing framework
+- **FastAPI** >=0.115 - Async web framework
+- **Uvicorn** >=0.30 - ASGI server
+- **Motor** >=3.0 - Async MongoDB driver
+- **Pydantic** >=2.0 - Data validation and settings
+- **pytest** >=8.0 - Testing framework
 
 ## Migration Status
 
-| Component | Status |
-|-----------|--------|
-| MongoDB connection (Motor) | Complete |
-| Two-tier credential system | Complete |
-| Health monitoring | Complete |
-| Language creation endpoint | Complete |
-| Repository pattern | In Progress |
-| Full CRUD operations | Pending |
-| Data migration utilities | Pending |
+The MongoDB migration from the original PostgreSQL prototype is complete.
 
-## Local MongoDB Setup (Docker)
+## Local MongoDB Setup
 
-For development, we use a local MongoDB instance via Docker to avoid external dependencies.
+MongoDB is downloaded to `~/.nlm/bin/mongod` (by `npm run prepare:mongo`) and is managed automatically when running the full app.
 
-### Quick Start
+When running the backend standalone (`python main.py` outside Electron), start MongoDB manually first:
 
 ```bash
-# Using docker-compose (recommended)
-cd back_end/docker && docker compose up -d
-
-# Or manually start MongoDB container on port 27018
-docker run -d \
-  --name nlm-mongodb \
-  -p 27018:27017 \
-  -v nlm-mongo-data:/data/db \
-  mongo:8.0
-```
-
-**Port mapping**: `-p 27018:27017` maps container's MongoDB (27017) to host port 27018, avoiding conflicts with other MongoDB instances.
-
-### Managing the Container
-
-```bash
-# Check status
-docker ps --filter name=nlm-mongodb
-
-# Stop
-docker stop nlm-mongodb
-
-# Start (after stopping)
-docker start nlm-mongodb
-
-# Remove (data persists in volume)
-docker rm nlm-mongodb
-
-# Remove data volume (CAUTION: deletes all data)
-docker volume rm nlm-mongo-data
-```
-
-### Connection String
-
-For local Docker MongoDB:
-```
-mongodb://localhost:27018
+~/.nlm/bin/mongod --port 27019 --dbpath ~/.nlm/db
 ```
 
 ### Credentials Setup
@@ -248,7 +204,7 @@ mongodb://localhost:27018
 1. Create credentials file:
 ```bash
 mkdir -p ~/.nlm
-echo 'MONGODB_CONNECTION_STRING="mongodb://localhost:27018"' > ~/.nlm/mongodb_credentials.env
+echo 'MONGODB_CONNECTION_STRING="mongodb://localhost:27019"' > ~/.nlm/mongodb_credentials.env
 ```
 
 2. Update `db_connector/mongo_credentials_path.env`:
@@ -260,9 +216,5 @@ DATABASE_NAME='nlm_db'
 ### Verify Connection
 
 ```bash
-# Using mongosh (if installed)
-mongosh --port 27018 --eval "db.runCommand({ping: 1})"
-
-# Or via Docker
-docker exec nlm-mongodb mongosh --eval "db.runCommand({ping: 1})"
+mongosh --port 27019 --eval "db.runCommand({ping: 1})"
 ```

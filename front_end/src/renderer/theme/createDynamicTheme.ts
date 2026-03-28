@@ -13,6 +13,7 @@ import { createTheme, type Theme, type ThemeOptions } from '@mui/material/styles
 export interface AppSettings {
   fontFamily: 'system-ui' | 'Times New Roman';
   fontSize: number; // 12-24
+  toolPreviewEnabled: boolean;
 }
 
 /**
@@ -21,6 +22,7 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   fontFamily: 'system-ui',
   fontSize: 16,
+  toolPreviewEnabled: true,
 };
 
 /**
@@ -57,6 +59,32 @@ const BASE_THEME_OPTIONS: ThemeOptions = {
     },
   },
   components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        // Global dark-themed scrollbar styling
+        '*': {
+          scrollbarWidth: 'thin', // Firefox
+          scrollbarColor: 'rgba(255, 255, 255, 0.3) transparent',
+        },
+        '*::-webkit-scrollbar': {
+          width: '8px',
+          height: '8px',
+        },
+        '*::-webkit-scrollbar-track': {
+          background: 'transparent',
+        },
+        '*::-webkit-scrollbar-thumb': {
+          background: 'rgba(255, 255, 255, 0.2)',
+          borderRadius: '4px',
+          '&:hover': {
+            background: 'rgba(255, 255, 255, 0.35)',
+          },
+        },
+        '*::-webkit-scrollbar-corner': {
+          background: 'transparent',
+        },
+      },
+    },
     MuiButton: {
       styleOverrides: {
         root: {

@@ -38,13 +38,11 @@ class TestListDictionaryEntries:
             assert "part_of_speech" in entry
 
     @pytest.mark.asyncio
-    async def test_list_dictionary_entries_with_translation_type(self, mock_mcp_db):
-        """Filters by translation type when specified"""
+    async def test_list_dictionary_entries_returns_entries_for_language(self, mock_mcp_db):
+        """Returns entries for the language"""
         from mcp_server.tools.dictionary import list_dictionary_entries
 
-        result = await list_dictionary_entries(
-            mock_mcp_db, "heb", translation_type="human"
-        )
+        result = await list_dictionary_entries(mock_mcp_db, "heb")
 
         assert "entries" in result
 
@@ -132,13 +130,11 @@ class TestGetDictionaryEntry:
         assert result["error"]["code"] == "not_found"
 
     @pytest.mark.asyncio
-    async def test_get_dictionary_entry_with_translation_type(self, mock_mcp_db):
-        """Filters by translation type when specified"""
+    async def test_get_dictionary_entry_returns_word_field(self, mock_mcp_db):
+        """Entry returned has word field"""
         from mcp_server.tools.dictionary import get_dictionary_entry
 
-        result = await get_dictionary_entry(
-            mock_mcp_db, "heb", "בראשית", translation_type="human"
-        )
+        result = await get_dictionary_entry(mock_mcp_db, "heb", "בראשית")
 
         assert "word" in result
 
@@ -179,7 +175,7 @@ class TestUpsertDictionaryEntries:
         ]
 
         result = await upsert_dictionary_entries(
-            mock_mcp_db, "heb", "human", new_entries
+            mock_mcp_db, "heb", new_entries
         )
 
         assert result["created"] >= 1
@@ -200,7 +196,7 @@ class TestUpsertDictionaryEntries:
         ]
 
         result = await upsert_dictionary_entries(
-            mock_mcp_db, "heb", "human", entries
+            mock_mcp_db, "heb", entries
         )
 
         assert result["updated"] >= 1
@@ -216,7 +212,7 @@ class TestUpsertDictionaryEntries:
         ]
 
         result = await upsert_dictionary_entries(
-            mock_mcp_db, "heb", "human", entries
+            mock_mcp_db, "heb", entries
         )
 
         assert result["created"] + result["updated"] == 2
@@ -229,7 +225,7 @@ class TestUpsertDictionaryEntries:
         entries = [{"word": "test", "definition": "test def", "part_of_speech": "noun"}]
 
         result = await upsert_dictionary_entries(
-            mock_mcp_db, "heb", "human", entries
+            mock_mcp_db, "heb", entries
         )
 
         assert "created" in result
@@ -241,7 +237,7 @@ class TestUpsertDictionaryEntries:
         """Handles empty entries array"""
         from mcp_server.tools.dictionary import upsert_dictionary_entries
 
-        result = await upsert_dictionary_entries(mock_mcp_db, "heb", "human", [])
+        result = await upsert_dictionary_entries(mock_mcp_db, "heb", [])
 
         assert result["created"] == 0
         assert result["updated"] == 0
@@ -254,26 +250,11 @@ class TestUpsertDictionaryEntries:
         entries = [{"word": "test", "definition": "test", "part_of_speech": "noun"}]
 
         result = await upsert_dictionary_entries(
-            mock_mcp_db, "nonexistent", "human", entries
+            mock_mcp_db, "nonexistent", entries
         )
 
         assert "error" in result
         assert result["error"]["code"] == "not_found"
-
-    @pytest.mark.asyncio
-    async def test_upsert_dictionary_entries_requires_translation_type(self, mock_mcp_db):
-        """Requires translation_type for writes"""
-        from mcp_server.tools.dictionary import upsert_dictionary_entries
-
-        entries = [{"word": "test", "definition": "test", "part_of_speech": "noun"}]
-
-        # translation_type is required, None should error
-        result = await upsert_dictionary_entries(
-            mock_mcp_db, "heb", None, entries  # type: ignore
-        )
-
-        assert "error" in result
-        assert result["error"]["code"] == "invalid_input"
 
     @pytest.mark.asyncio
     async def test_upsert_dictionary_entries_validates_entries(self, mock_mcp_db):
@@ -284,8 +265,41 @@ class TestUpsertDictionaryEntries:
         entries = [{"word": "test", "part_of_speech": "noun"}]
 
         result = await upsert_dictionary_entries(
-            mock_mcp_db, "heb", "human", entries
+            mock_mcp_db, "heb", entries
         )
 
         assert "error" in result
         assert result["error"]["code"] == "validation_error"
+
+    @pytest.mark.asyncio
+    async def test_upsert_rejects_oversized_word(self, mock_mcp_db):
+        """Words exceeding max_length are rejected, not written."""
+        from mcp_server.tools.dictionary import upsert_dictionary_entries
+        entries = [{"word": "x" * 300, "definition": "test"}]
+        result = await upsert_dictionary_entries(mock_mcp_db, "heb", entries)
+        assert "error" in result or result.get("failed", 0) > 0
+
+    @pytest.mark.asyncio
+    async def test_upsert_rejects_wrong_type_definition(self, mock_mcp_db):
+        """Definition must be a string, not a number or dict."""
+        from mcp_server.tools.dictionary import upsert_dictionary_entries
+        entries = [{"word": "test", "definition": 12345}]
+        result = await upsert_dictionary_entries(mock_mcp_db, "heb", entries)
+        assert "error" in result or result.get("failed", 0) > 0
+
+    @pytest.mark.asyncio
+    async def test_upsert_rejects_dollar_prefix_keys(self, mock_mcp_db):
+        """Entries with $-prefixed keys (operator injection attempt) are rejected."""
+        from mcp_server.tools.dictionary import upsert_dictionary_entries
+        entries = [{"word": "test", "definition": "ok", "$set": {"x": 1}}]
+        result = await upsert_dictionary_entries(mock_mcp_db, "heb", entries)
+        assert "error" in result or result.get("failed", 0) > 0
+
+    @pytest.mark.asyncio
+    async def test_upsert_still_accepts_valid_entry(self, mock_mcp_db):
+        """Regression: normal LLM-shaped entries still accepted after validation."""
+        from mcp_server.tools.dictionary import upsert_dictionary_entries
+        entries = [{"word": "shalom", "definition": "peace", "part_of_speech": "noun",
+                    "examples": ["shalom aleichem"]}]
+        result = await upsert_dictionary_entries(mock_mcp_db, "heb", entries)
+        assert result.get("created", 0) + result.get("updated", 0) >= 1

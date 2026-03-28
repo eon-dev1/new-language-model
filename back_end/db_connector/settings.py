@@ -105,7 +105,7 @@ class MongoDBSettings(BaseSettings):
                     value = value.strip().strip('"').strip("'")
                     os.environ[key] = value
         
-        logger.info(f"Loaded MongoDB credentials from {actual_credentials_file}")
+        logger.debug(f"Loaded MongoDB credentials from {actual_credentials_file.name}")
         
         # Verify connection string was loaded
         connection_string = os.environ.get("MONGODB_CONNECTION_STRING")

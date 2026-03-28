@@ -46,7 +46,7 @@ const loadSettings = (): AppSettings => {
       typeof parsed.fontFamily === 'string' &&
       typeof parsed.fontSize === 'number'
     ) {
-      return parsed as AppSettings;
+      return { ...DEFAULT_SETTINGS, ...parsed } as AppSettings;
     }
 
     return DEFAULT_SETTINGS;

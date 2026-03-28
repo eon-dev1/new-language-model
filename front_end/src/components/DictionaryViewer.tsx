@@ -22,8 +22,6 @@ import {
   Button,
   CircularProgress,
   Divider,
-  Tabs,
-  Tab,
   List,
   ListItemButton,
   ListItemText,
@@ -37,8 +35,6 @@ import {
   Cancel,
   CheckCircle,
   CheckCircleOutline,
-  Person,
-  SmartToy,
   Add
 } from '@mui/icons-material';
 import { motion } from 'framer-motion';
@@ -46,9 +42,12 @@ import {
   fetchDictionaryEntries,
   saveDictionaryEntry,
   verifyDictionaryEntry,
+  appendCorrectionLog,
   MergedDictionaryEntry,
-  DictionaryEntryVersion
 } from '../renderer/api';
+import { useChat } from '../renderer/contexts/ChatContext';
+import { TOPBAR_HEIGHT } from '../renderer/constants';
+import { CopyIconButton } from './CopyIconButton';
 
 interface DictionaryViewerProps {
   languageCode: string;
@@ -57,13 +56,11 @@ interface DictionaryViewerProps {
 }
 
 type ViewState = 'list' | 'detail';
-type TabValue = 'human' | 'ai';
 
 export function DictionaryViewer({ languageCode, languageName, onBack }: DictionaryViewerProps) {
   // Navigation state
   const [view, setView] = useState<ViewState>('list');
   const [selectedEntry, setSelectedEntry] = useState<MergedDictionaryEntry | null>(null);
-  const [activeTab, setActiveTab] = useState<TabValue>('human');
 
   // Data state
   const [entries, setEntries] = useState<MergedDictionaryEntry[]>([]);
@@ -71,13 +68,20 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Report context to chat
+  const { setAppContext, injectContextNote } = useChat();
+  useEffect(() => {
+    setAppContext({ languageCode, bookCode: null, chapter: null, view: 'dictionary' });
+  }, [languageCode, setAppContext]);
+
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({
     word: '',
     definition: '',
     partOfSpeech: '',
-    examples: ''
+    examples: '',
+    whatWasWrong: ''
   });
   const [saving, setSaving] = useState(false);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
@@ -105,13 +109,18 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
   const filteredEntries = useMemo(() => {
     if (!searchQuery.trim()) return entries;
     const query = searchQuery.toLowerCase();
-    return entries.filter(e => e.word.toLowerCase().includes(query));
+    return entries.filter(e => {
+      if (e.word.toLowerCase().includes(query)) return true;
+      return (
+        e.definition.toLowerCase().includes(query) ||
+        (e.part_of_speech?.toLowerCase().includes(query) ?? false) ||
+        e.examples.some(ex => ex.toLowerCase().includes(query))
+      );
+    });
   }, [entries, searchQuery]);
 
   const handleSelectEntry = (entry: MergedDictionaryEntry) => {
     setSelectedEntry(entry);
-    // Default to human tab if exists, otherwise ai
-    setActiveTab(entry.human ? 'human' : 'ai');
     setView('detail');
     setIsEditing(false);
   };
@@ -135,18 +144,47 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
     setView('detail');
   };
 
-  const handleTabChange = (_: React.SyntheticEvent, newValue: TabValue) => {
-    setActiveTab(newValue);
-    setIsEditing(false);
+  const handleCardEdit = (entry: MergedDictionaryEntry, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedEntry(entry);
+    setView('detail');
+    setTimeout(() => {
+      setEditForm({
+        word: entry.word,
+        definition: entry.definition || '',
+        partOfSpeech: entry.part_of_speech || '',
+        examples: entry.examples?.join('\n') || '',
+        whatWasWrong: ''
+      });
+      setIsEditing(true);
+    }, 0);
+  };
+
+  const handleCardVerify = async (entry: MergedDictionaryEntry, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newVerified = !entry.human_verified;
+
+    try {
+      await verifyDictionaryEntry(languageCode, entry.word, newVerified);
+
+      setEntries(prev => prev.map(ent => {
+        if (ent.word === entry.word) {
+          return { ...ent, human_verified: newVerified };
+        }
+        return ent;
+      }));
+    } catch (err) {
+      console.error('Failed to verify entry:', err);
+    }
   };
 
   const handleStartEdit = () => {
-    const currentVersion = activeTab === 'human' ? selectedEntry?.human : selectedEntry?.ai;
     setEditForm({
       word: selectedEntry?.word || '',
-      definition: currentVersion?.definition || '',
-      partOfSpeech: currentVersion?.part_of_speech || '',
-      examples: currentVersion?.examples?.join('\n') || ''
+      definition: selectedEntry?.definition || '',
+      partOfSpeech: selectedEntry?.part_of_speech || '',
+      examples: selectedEntry?.examples?.join('\n') || '',
+      whatWasWrong: ''
     });
     setIsEditing(true);
   };
@@ -179,7 +217,17 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
       const updated = updatedEntries.entries.find(e => e.word === editForm.word.trim().toLowerCase());
       if (updated) {
         setSelectedEntry(updated);
-        setActiveTab('human'); // Saved entry is always human
+      }
+
+      if (!isCreatingNew && editForm.whatWasWrong.trim()) {
+        injectContextNote(`[Correction note] ${editForm.word}: ${editForm.whatWasWrong}\nCorrected text: "${editForm.definition}"`);
+        appendCorrectionLog(languageCode, {
+          content_type: 'dictionary_entry',
+          content_reference: { word: editForm.word },
+          original_text: '',
+          what_was_wrong: editForm.whatWasWrong.trim(),
+          correction: editForm.definition,
+        }).catch(err => console.error('Correction log save failed:', err));
       }
 
       setIsEditing(false);
@@ -194,65 +242,36 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
   const handleVerify = async () => {
     if (!selectedEntry) return;
 
-    const currentVersion = activeTab === 'human' ? selectedEntry.human : selectedEntry.ai;
-    if (!currentVersion) return;
-
-    const newVerified = !currentVersion.human_verified;
+    const newVerified = !selectedEntry.human_verified;
 
     try {
-      await verifyDictionaryEntry(languageCode, selectedEntry.word, activeTab, newVerified);
+      await verifyDictionaryEntry(languageCode, selectedEntry.word, newVerified);
 
-      // Update local state
       setEntries(prev => prev.map(e => {
         if (e.word === selectedEntry.word) {
-          const updated = { ...e };
-          if (activeTab === 'human' && updated.human) {
-            updated.human = { ...updated.human, human_verified: newVerified };
-          } else if (activeTab === 'ai' && updated.ai) {
-            updated.ai = { ...updated.ai, human_verified: newVerified };
-          }
-          return updated;
+          return { ...e, human_verified: newVerified };
         }
         return e;
       }));
 
-      // Update selected entry
-      setSelectedEntry(prev => {
-        if (!prev) return prev;
-        const updated = { ...prev };
-        if (activeTab === 'human' && updated.human) {
-          updated.human = { ...updated.human, human_verified: newVerified };
-        } else if (activeTab === 'ai' && updated.ai) {
-          updated.ai = { ...updated.ai, human_verified: newVerified };
-        }
-        return updated;
-      });
+      setSelectedEntry(prev => prev ? { ...prev, human_verified: newVerified } : prev);
     } catch (err) {
       console.error('Failed to verify entry:', err);
     }
   };
 
-  // Get source badge for an entry
-  const getSourceBadge = (entry: MergedDictionaryEntry) => {
-    const sources = [];
-    if (entry.human) sources.push('H');
-    if (entry.ai) sources.push('AI');
-    return sources.join('/');
-  };
-
-  // Get current version based on active tab
-  const getCurrentVersion = (): DictionaryEntryVersion | undefined => {
-    if (!selectedEntry) return undefined;
-    return activeTab === 'human' ? selectedEntry.human : selectedEntry.ai;
+  // Get entry for display
+  const getCurrentVersion = (): MergedDictionaryEntry | undefined => {
+    return selectedEntry ?? undefined;
   };
 
   // Render word list
   const renderWordList = () => (
-    <Box>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Search bar */}
       <TextField
         fullWidth
-        placeholder="Search words..."
+        placeholder="Search dictionary..."
         value={searchQuery}
         onChange={(e) => setSearchQuery(e.target.value)}
         sx={{
@@ -273,45 +292,140 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
         }}
       />
 
-      {/* Entry list */}
-      <List sx={{ maxHeight: '60vh', overflow: 'auto' }}>
-        {filteredEntries.map((entry) => (
-          <motion.div key={entry.word} whileHover={{ x: 4 }}>
-            <ListItemButton
-              onClick={() => handleSelectEntry(entry)}
-              sx={{
-                mb: 0.5,
-                borderRadius: 1,
-                bgcolor: 'rgba(255,255,255,0.03)',
-                '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' }
-              }}
-            >
-              <ListItemText
-                primary={
-                  <Typography sx={{ color: 'white', fontWeight: 500 }}>
+      {/* Entry list - enhanced cards with full details */}
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+        {filteredEntries.map((entry) => {
+          const displayVersion = entry;
+          const isVerified = entry.human_verified;
+
+          return (
+            <motion.div key={entry.word} whileHover={{ scale: 1.005 }}>
+              <Paper
+                sx={{
+                  mb: 1.5,
+                  p: 2,
+                  bgcolor: 'rgba(255,255,255,0.03)',
+                  cursor: 'pointer',
+                  borderRadius: 2,
+                  '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+                  maxHeight: 220,
+                  overflow: 'hidden',
+                  position: 'relative'
+                }}
+                onClick={() => handleSelectEntry(entry)}
+              >
+                {/* Header: Word + Badges */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="body1" sx={{ color: 'white', fontWeight: 600 }}>
                     {entry.word}
                   </Typography>
-                }
-                secondary={
-                  <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
-                    {(entry.human?.definition || entry.ai?.definition || '').slice(0, 60)}
-                    {(entry.human?.definition || entry.ai?.definition || '').length > 60 ? '...' : ''}
-                  </Typography>
-                }
-              />
-              <Chip
-                size="small"
-                label={getSourceBadge(entry)}
-                sx={{
-                  bgcolor: entry.human ? 'rgba(33,150,243,0.3)' : 'rgba(255,152,0,0.3)',
-                  color: 'white',
-                  fontSize: '0.7rem'
-                }}
-              />
-            </ListItemButton>
-          </motion.div>
-        ))}
-      </List>
+                  {isVerified && (
+                    <CheckCircle sx={{ color: '#4CAF50', fontSize: 18 }} />
+                  )}
+                </Box>
+
+                {/* Part of Speech */}
+                {displayVersion?.part_of_speech && (
+                  <Chip
+                    size="small"
+                    label={displayVersion.part_of_speech}
+                    sx={{
+                      mb: 1,
+                      bgcolor: 'rgba(255,255,255,0.1)',
+                      color: 'rgba(255,255,255,0.7)'
+                    }}
+                  />
+                )}
+
+                {/* Definition */}
+                <Typography
+                  variant="body2"
+                  sx={{
+                    color: 'rgba(255,255,255,0.8)',
+                    mb: 1,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {displayVersion?.definition || '(No definition)'}
+                </Typography>
+
+                {/* Examples (if any) */}
+                {displayVersion?.examples && displayVersion.examples.length > 0 && (
+                  <Box sx={{ mb: 1 }}>
+                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)', display: 'block', mb: 0.5 }}>
+                      Examples:
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        color: 'rgba(255,255,255,0.7)',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden'
+                      }}
+                    >
+                      {displayVersion.examples.slice(0, 3).map(ex => `• ${ex}`).join('  ')}
+                    </Typography>
+                  </Box>
+                )}
+
+                {/* Action buttons */}
+                <Box sx={{ display: 'flex', gap: 1, mt: 1.5 }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<Edit />}
+                    onClick={(e) => handleCardEdit(entry, e)}
+                    sx={{
+                      color: 'white',
+                      borderColor: 'rgba(255,255,255,0.3)',
+                      '&:hover': { borderColor: 'rgba(255,255,255,0.5)' }
+                    }}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    size="small"
+                    variant={isVerified ? 'contained' : 'outlined'}
+                    startIcon={isVerified ? <CheckCircle /> : <CheckCircleOutline />}
+                    onClick={(e) => handleCardVerify(entry, e)}
+                    color={isVerified ? 'success' : 'inherit'}
+                    sx={!isVerified ? {
+                      color: 'white',
+                      borderColor: 'rgba(255,255,255,0.3)',
+                      '&:hover': { borderColor: 'rgba(255,255,255,0.5)' }
+                    } : {}}
+                  >
+                    {isVerified ? 'Verified' : 'Verify'}
+                  </Button>
+                  <Box component="span" onClick={(e) => e.stopPropagation()}>
+                    <CopyIconButton
+                      text={[entry.word, displayVersion?.part_of_speech, '', displayVersion?.definition, '', ...(displayVersion?.examples || [])].filter(Boolean).join('\n').trim()}
+                    />
+                  </Box>
+                </Box>
+
+                {/* Overflow indicator gradient */}
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: 24,
+                    background: 'linear-gradient(transparent, rgba(30,30,30,0.95))',
+                    pointerEvents: 'none'
+                  }}
+                />
+              </Paper>
+            </motion.div>
+          );
+        })}
+      </Box>
 
       {filteredEntries.length === 0 && !loading && (
         <Box sx={{ textAlign: 'center', py: 6 }}>
@@ -386,6 +500,19 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
         InputProps={{ sx: { color: 'white' } }}
         InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.7)' } }}
       />
+      {!isCreatingNew && (
+        <TextField
+          fullWidth
+          multiline
+          rows={2}
+          label="Optional: describe the correction"
+          value={editForm.whatWasWrong}
+          onChange={(e) => setEditForm(prev => ({ ...prev, whatWasWrong: e.target.value }))}
+          sx={{ mb: 2 }}
+          InputProps={{ sx: { color: 'white' } }}
+          InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.7)' } }}
+        />
+      )}
       <Box sx={{ display: 'flex', gap: 2 }}>
         <Button
           variant="contained"
@@ -411,7 +538,6 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
   // Render detail view
   const renderDetail = () => {
     const currentVersion = getCurrentVersion();
-    const hasBothVersions = selectedEntry?.human && selectedEntry?.ai;
 
     // Creating new entry - show edit form with "New Entry" header
     if (isCreatingNew && !selectedEntry) {
@@ -429,54 +555,6 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
 
     return (
       <Box>
-        {/* Tabs if both versions exist */}
-        {hasBothVersions && (
-          <Tabs
-            value={activeTab}
-            onChange={handleTabChange}
-            sx={{ mb: 2, borderBottom: 1, borderColor: 'rgba(255,255,255,0.2)' }}
-          >
-            <Tab
-              value="human"
-              label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Person fontSize="small" />
-                  Human
-                  {selectedEntry?.human?.human_verified && (
-                    <CheckCircle sx={{ fontSize: 16, color: '#4CAF50' }} />
-                  )}
-                </Box>
-              }
-              sx={{ color: 'white', '&.Mui-selected': { color: '#2196F3' } }}
-            />
-            <Tab
-              value="ai"
-              label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <SmartToy fontSize="small" />
-                  AI
-                  {selectedEntry?.ai?.human_verified && (
-                    <CheckCircle sx={{ fontSize: 16, color: '#4CAF50' }} />
-                  )}
-                </Box>
-              }
-              sx={{ color: 'white', '&.Mui-selected': { color: '#FF9800' } }}
-            />
-          </Tabs>
-        )}
-
-        {/* Source badge if only one version */}
-        {!hasBothVersions && (
-          <Chip
-            icon={activeTab === 'human' ? <Person /> : <SmartToy />}
-            label={activeTab === 'human' ? 'Human Entry' : 'AI Entry'}
-            sx={{
-              mb: 2,
-              bgcolor: activeTab === 'human' ? 'rgba(33,150,243,0.3)' : 'rgba(255,152,0,0.3)',
-              color: 'white'
-            }}
-          />
-        )}
 
         {isEditing ? (
           renderEditForm()
@@ -536,6 +614,9 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
               >
                 {currentVersion?.human_verified ? 'Verified' : 'Verify'}
               </Button>
+              <CopyIconButton
+                text={[selectedEntry?.word, currentVersion?.part_of_speech, '', currentVersion?.definition, '', ...(currentVersion?.examples || [])].filter(Boolean).join('\n').trim()}
+              />
             </Box>
           </Box>
         )}
@@ -546,15 +627,18 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
   return (
     <Box
       sx={{
-        minHeight: '100vh',
+        height: '100vh',
+        overflow: 'hidden',  // Prevent page-level scroll
         background: 'linear-gradient(135deg, #1A1A1A, #2D2D2D)',
-        pt: 7,  // 56px to clear fixed TopBar (48px)
+        pt: `${TOPBAR_HEIGHT + 8}px`,
         pb: 4,
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
-      <Container maxWidth="lg">
+      <Container maxWidth="lg" sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         {/* Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, flexShrink: 0 }}>
           <IconButton onClick={handleBack} sx={{ mr: 2, color: 'white' }}>
             <ArrowBack />
           </IconButton>
@@ -584,7 +668,7 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
             </Box>
           </Paper>
         ) : (
-          <Paper elevation={3} sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)' }}>
+          <Paper elevation={3} sx={{ p: 3, bgcolor: 'rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
             {view === 'list' && renderWordList()}
             {view === 'detail' && renderDetail()}
           </Paper>

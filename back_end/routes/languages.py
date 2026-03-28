@@ -12,6 +12,7 @@ import logging
 from db_connector.connection import MongoDBConnector
 from constants import Collection
 from .dependencies import get_db, api_error
+from utils.usfm_parser.usfm_book_codes import OT_BOOK_CODES
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -34,7 +35,10 @@ async def get_languages(db: MongoDBConnector = Depends(get_db)) -> Dict[str, Any
                 - status (str): active/inactive
                 - total_verses (int): Number of verses
                 - verified_count (int): Number of human-verified verses
-                - verification_progress (float): Percentage of human-verified verses (0-100)
+                - verification_progress (dict): Percentage breakdown with:
+                    - old_testament (float): OT verification % (0-100)
+                    - new_testament (float): NT verification % (0-100)
+                    - total (float): Overall verification % (0-100)
             - count (int): Total number of languages
 
     Raises:
@@ -44,7 +48,8 @@ async def get_languages(db: MongoDBConnector = Depends(get_db)) -> Dict[str, Any
         database = db.get_database()
         bible_texts = database[Collection.BIBLE_TEXTS]
 
-        # Always detect languages from bible_texts to catch new imports
+        # Aggregation pipeline that calculates OT/NT verification separately
+        # Uses book_code to determine testament (OT_BOOK_CODES list vs others)
         pipeline = [
             {
                 "$group": {
@@ -53,6 +58,32 @@ async def get_languages(db: MongoDBConnector = Depends(get_db)) -> Dict[str, Any
                     "total_verses": {"$sum": 1},
                     "verified_count": {
                         "$sum": {"$cond": [{"$eq": ["$human_verified", True]}, 1, 0]}
+                    },
+                    # OT verses (book_code in OT_BOOK_CODES)
+                    "ot_total": {
+                        "$sum": {"$cond": [{"$in": ["$book_code", OT_BOOK_CODES]}, 1, 0]}
+                    },
+                    "ot_verified": {
+                        "$sum": {"$cond": [
+                            {"$and": [
+                                {"$in": ["$book_code", OT_BOOK_CODES]},
+                                {"$eq": ["$human_verified", True]}
+                            ]},
+                            1, 0
+                        ]}
+                    },
+                    # NT verses (book_code NOT in OT_BOOK_CODES)
+                    "nt_total": {
+                        "$sum": {"$cond": [{"$not": {"$in": ["$book_code", OT_BOOK_CODES]}}, 1, 0]}
+                    },
+                    "nt_verified": {
+                        "$sum": {"$cond": [
+                            {"$and": [
+                                {"$not": {"$in": ["$book_code", OT_BOOK_CODES]}},
+                                {"$eq": ["$human_verified", True]}
+                            ]},
+                            1, 0
+                        ]}
                     }
                 }
             },
@@ -73,13 +104,33 @@ async def get_languages(db: MongoDBConnector = Depends(get_db)) -> Dict[str, Any
                     "total_verses": 1,
                     "verified_count": 1,
                     "verification_progress": {
-                        "$multiply": [
-                            {"$divide": [
-                                "$verified_count",
-                                {"$max": ["$total_verses", 1]}
-                            ]},
-                            100
-                        ]
+                        "old_testament": {
+                            "$multiply": [
+                                {"$divide": [
+                                    "$ot_verified",
+                                    {"$max": ["$ot_total", 1]}
+                                ]},
+                                100
+                            ]
+                        },
+                        "new_testament": {
+                            "$multiply": [
+                                {"$divide": [
+                                    "$nt_verified",
+                                    {"$max": ["$nt_total", 1]}
+                                ]},
+                                100
+                            ]
+                        },
+                        "total": {
+                            "$multiply": [
+                                {"$divide": [
+                                    "$verified_count",
+                                    {"$max": ["$total_verses", 1]}
+                                ]},
+                                100
+                            ]
+                        }
                     },
                     "status": {"$literal": "active"},
                     "is_base_language": {"$eq": ["$_id", "english"]}

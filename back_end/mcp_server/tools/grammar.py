@@ -7,20 +7,31 @@ Tools:
 - update_grammar_category: Update category using $set
 
 Note: Grammar uses nested categories{} pattern.
-One doc per (language, translation_type) with 5 categories:
+One doc per language with 5 categories:
 phonology, morphology, syntax, semantics, discourse
 """
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from mcp_server.tools.base import (
     ToolError,
     error_response,
     success_response,
     validate_language,
-    validate_translation_type,
 )
+
+
+class GrammarUpdateInput(BaseModel):
+    """LLM-facing validation model for grammar category updates."""
+    model_config = ConfigDict(extra="forbid")
+
+    description: Optional[str] = Field(None, max_length=10000)
+    notes: Optional[list[str]] = Field(None, max_length=50)
+    examples: Optional[list[str]] = Field(None, max_length=50)
+    subcategories: Optional[list[dict]] = Field(None, max_length=30)
 
 # Valid grammar category names
 VALID_CATEGORIES = frozenset(
@@ -62,41 +73,28 @@ def _has_content(category_data: dict) -> bool:
     return False
 
 
-async def _get_grammar_doc(
-    db, language_code: str, translation_type: str | None = None
-) -> dict | None:
+async def _get_grammar_doc(db, language_code: str) -> dict | None:
     """
     Get grammar system document for a language.
 
     Args:
         db: MongoDBConnector instance
         language_code: Language code
-        translation_type: Optional filter
 
     Returns:
         Grammar system document or None
     """
     grammar_systems = db.get_collection("grammar_systems")
-
-    query = {"language_code": language_code.lower()}
-    if translation_type:
-        query["translation_type"] = translation_type
-
-    return await grammar_systems.find_one(query)
+    return await grammar_systems.find_one({"language_code": language_code.lower()})
 
 
-async def list_grammar_categories(
-    db,
-    language_code: str,
-    translation_type: str | None = None,
-) -> dict[str, Any]:
+async def list_grammar_categories(db, language_code: str) -> dict[str, Any]:
     """
     List all grammar categories with content status.
 
     Args:
         db: MongoDBConnector instance
         language_code: Language to get categories for
-        translation_type: Optional filter ("human" or "ai")
 
     Returns:
         {
@@ -110,14 +108,8 @@ async def list_grammar_categories(
     except ToolError as e:
         return error_response(e)
 
-    # Validate translation type
-    try:
-        validate_translation_type(translation_type)
-    except ToolError as e:
-        return error_response(e)
-
     # Get grammar document
-    doc = await _get_grammar_doc(db, language_code, translation_type)
+    doc = await _get_grammar_doc(db, language_code)
 
     if doc is None:
         return success_response({"categories": [], "count": 0})
@@ -142,7 +134,6 @@ async def get_grammar_category(
     db,
     language_code: str,
     category: str,
-    translation_type: str | None = None,
 ) -> dict[str, Any]:
     """
     Get specific grammar category content.
@@ -151,7 +142,6 @@ async def get_grammar_category(
         db: MongoDBConnector instance
         language_code: Language to get category for
         category: Category name (phonology, morphology, syntax, semantics, discourse)
-        translation_type: Optional filter ("human" or "ai")
 
     Returns:
         Category content with name, description, subcategories, notes, examples
@@ -168,14 +158,8 @@ async def get_grammar_category(
     except ToolError as e:
         return error_response(e)
 
-    # Validate translation type
-    try:
-        validate_translation_type(translation_type)
-    except ToolError as e:
-        return error_response(e)
-
     # Get grammar document
-    doc = await _get_grammar_doc(db, language_code, translation_type)
+    doc = await _get_grammar_doc(db, language_code)
 
     if doc is None:
         return error_response(
@@ -203,7 +187,6 @@ async def update_grammar_category(
     db,
     language_code: str,
     category: str,
-    translation_type: str | None,
     content: dict[str, Any],
 ) -> dict[str, Any]:
     """
@@ -213,7 +196,6 @@ async def update_grammar_category(
         db: MongoDBConnector instance
         language_code: Target language
         category: Category name to update
-        translation_type: Required ("human" or "ai")
         content: Fields to update (description, subcategories, notes, examples)
 
     Returns:
@@ -231,27 +213,24 @@ async def update_grammar_category(
     except ToolError as e:
         return error_response(e)
 
-    # translation_type is required for writes
-    if translation_type is None:
+    # Validate and sanitize content via Pydantic model
+    try:
+        validated = GrammarUpdateInput.model_validate(content)
+        content = validated.model_dump(exclude_unset=True)
+    except ValidationError as e:
         return error_response(
             ToolError(
-                "invalid_input",
-                "translation_type is required for write operations",
-                {"translation_type": None},
+                "validation_error",
+                str(e),
+                {"content": content},
             )
         )
-
-    # Validate translation type
-    try:
-        validate_translation_type(translation_type)
-    except ToolError as e:
-        return error_response(e)
 
     grammar_systems = db.get_collection("grammar_systems")
     now = datetime.now(timezone.utc)
 
     # Get existing document
-    doc = await _get_grammar_doc(db, language_code, translation_type)
+    doc = await _get_grammar_doc(db, language_code)
 
     if doc is None:
         # Create new grammar system with this category
@@ -276,7 +255,6 @@ async def update_grammar_category(
 
         new_doc = {
             "language_code": language_code.lower(),
-            "translation_type": translation_type,
             "categories": categories,
             "created_at": now,
         }

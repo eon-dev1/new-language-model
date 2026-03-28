@@ -1,32 +1,56 @@
 # dictionary.py
 """
-Dictionary endpoints for unified human/AI dictionary views.
+Dictionary endpoints for language dictionary views.
 
 Provides endpoints to:
-- Fetch merged dictionary entries from both human and AI sources
-- Create/update human dictionary entries
+- Fetch dictionary entries for a language
+- Create/update dictionary entries
 - Update human_verified status for entries
 """
 
 from fastapi import APIRouter, HTTPException, Path, Body, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 import logging
 
 from db_connector.connection import MongoDBConnector
-from constants import Collection, TranslationType
+from constants import Collection
+from utils.word_index.builder import sync_dictionary_flags
 from .dependencies import get_db, api_error
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+# --- Helper Functions ---
+
+def _normalize_examples(examples_value) -> List[str]:
+    """
+    Normalize examples field to always return a list.
+
+    Handles legacy data where examples might be stored as:
+    - string: "example1, example2" → ["example1, example2"]
+    - list: ["ex1", "ex2"] → ["ex1", "ex2"]
+    - None/missing → []
+    """
+    if examples_value is None:
+        return []
+    if isinstance(examples_value, str):
+        # Legacy data: examples stored as string instead of list
+        return [examples_value] if examples_value else []
+    if isinstance(examples_value, list):
+        return examples_value
+    # Fallback for unexpected types
+    return []
+
+
 # --- Pydantic Models ---
 
-class EntryVersion(BaseModel):
-    """Single version (human or AI) of a dictionary entry."""
-    definition: str
+class DictionaryEntry(BaseModel):
+    """Single dictionary entry."""
+    word: str
+    definition: str = ""
     part_of_speech: Optional[str] = None
     examples: List[str] = []
     human_verified: bool = False
@@ -34,24 +58,19 @@ class EntryVersion(BaseModel):
     updated_at: Optional[datetime] = None
 
 
-class MergedEntry(BaseModel):
-    """Dictionary entry with optional human and AI versions."""
-    word: str
-    human: Optional[EntryVersion] = None
-    ai: Optional[EntryVersion] = None
-
-
 class EntriesResponse(BaseModel):
-    """Response containing merged dictionary entries."""
+    """Response containing dictionary entries."""
     language_code: str
-    entries: List[MergedEntry]
+    entries: List[DictionaryEntry]
     count: int
 
 
 class CreateEntryRequest(BaseModel):
-    """Request to create or update a human dictionary entry."""
-    word: str = Field(..., min_length=1)
-    definition: str = Field(..., min_length=1)
+    """Request to create or update a dictionary entry."""
+    model_config = ConfigDict(extra="forbid")
+
+    word: str = Field(..., min_length=1, max_length=200)
+    definition: str = Field(..., min_length=1, max_length=5000)
     part_of_speech: Optional[str] = None
     examples: List[str] = []
 
@@ -66,7 +85,6 @@ class CreateEntryResponse(BaseModel):
 
 class VerifyEntryRequest(BaseModel):
     """Request to update entry verification status."""
-    translation_type: str = Field(..., pattern="^(human|ai)$")
     human_verified: bool
 
 
@@ -75,7 +93,6 @@ class VerifyEntryResponse(BaseModel):
     success: bool
     word: str
     language_code: str
-    translation_type: str
     human_verified: bool
 
 
@@ -87,91 +104,56 @@ async def get_dictionary_entries(
     db: MongoDBConnector = Depends(get_db)
 ) -> EntriesResponse:
     """
-    Fetch all dictionary entries for a language, merging human and AI versions.
+    Fetch all dictionary entries for a language.
 
-    Returns entries with both human and AI versions where available,
-    sorted alphabetically by word.
+    Returns entries sorted alphabetically by word.
 
     Args:
         language: Target language code
 
     Returns:
-        EntriesResponse with merged entries from both sources
+        EntriesResponse with entries
 
     Raises:
-        HTTPException: 404 if no dictionary found, 500 on database error
+        HTTPException: 500 on database error
     """
     try:
         language_code = language.lower().replace(' ', '_').replace('-', '_')
         database = db.get_database()
         dictionaries = database[Collection.DICTIONARIES]
 
-        # Fetch both human and AI dictionary documents
-        human_doc = await dictionaries.find_one({
-            "language_code": language_code,
-            "translation_type": TranslationType.HUMAN
-        })
-        ai_doc = await dictionaries.find_one({
-            "language_code": language_code,
-            "translation_type": TranslationType.AI
-        })
+        # Fetch the single dictionary document for this language
+        doc = await dictionaries.find_one({"language_code": language_code})
 
-        if not human_doc and not ai_doc:
+        if not doc:
             # Return empty response instead of 404 - allows UI to show "create first entry"
             logger.info(f"No dictionary found for {language_code}, returning empty response")
             return EntriesResponse(language_code=language_code, entries=[], count=0)
 
-        # Build word -> versions map
-        entries_map: dict = {}
+        # Build flat entries list
+        entries = []
+        for entry in doc.get("entries", []):
+            word = entry.get("word", "").lower()
+            if word:
+                entries.append(DictionaryEntry(
+                    word=word,
+                    definition=entry.get("definition", ""),
+                    part_of_speech=entry.get("part_of_speech"),
+                    examples=_normalize_examples(entry.get("examples")),
+                    human_verified=entry.get("human_verified", False),
+                    created_at=entry.get("created_at"),
+                    updated_at=entry.get("updated_at")
+                ))
 
-        # Process human entries
-        if human_doc and human_doc.get("entries"):
-            for entry in human_doc["entries"]:
-                word = entry.get("word", "").lower()
-                if word:
-                    if word not in entries_map:
-                        entries_map[word] = {"word": word}
-                    entries_map[word]["human"] = EntryVersion(
-                        definition=entry.get("definition", ""),
-                        part_of_speech=entry.get("part_of_speech"),
-                        examples=entry.get("examples", []),
-                        human_verified=entry.get("human_verified", False),
-                        created_at=entry.get("created_at"),
-                        updated_at=entry.get("updated_at")
-                    )
+        # Sort alphabetically
+        entries.sort(key=lambda e: e.word)
 
-        # Process AI entries
-        if ai_doc and ai_doc.get("entries"):
-            for entry in ai_doc["entries"]:
-                word = entry.get("word", "").lower()
-                if word:
-                    if word not in entries_map:
-                        entries_map[word] = {"word": word}
-                    entries_map[word]["ai"] = EntryVersion(
-                        definition=entry.get("definition", ""),
-                        part_of_speech=entry.get("part_of_speech"),
-                        examples=entry.get("examples", []),
-                        human_verified=entry.get("human_verified", False),
-                        created_at=entry.get("created_at"),
-                        updated_at=entry.get("updated_at")
-                    )
-
-        # Convert to list and sort alphabetically
-        merged_entries = [
-            MergedEntry(
-                word=data["word"],
-                human=data.get("human"),
-                ai=data.get("ai")
-            )
-            for data in sorted(entries_map.values(), key=lambda x: x["word"])
-        ]
-
-        logger.info(f"Retrieved {len(merged_entries)} dictionary entries for {language_code}")
+        logger.info(f"Retrieved {len(entries)} dictionary entries for {language_code}")
 
         return EntriesResponse(
             language_code=language_code,
-            entries=merged_entries,
-            count=len(merged_entries)
+            entries=entries,
+            count=len(entries)
         )
 
     except HTTPException:
@@ -187,14 +169,10 @@ async def create_or_update_entry(
     db: MongoDBConnector = Depends(get_db)
 ) -> CreateEntryResponse:
     """
-    Create or update a human dictionary entry.
+    Create or update a dictionary entry.
 
-    If the word already exists in the human dictionary, updates it.
-    Otherwise, creates a new entry. Auto-sets human_verified = true.
-
-    This endpoint is used when:
-    - Creating new human entries from scratch
-    - Editing AI entries (creates new human doc, preserves AI)
+    If the word already exists, updates it. Otherwise, creates a new entry.
+    Auto-sets human_verified = true.
 
     Args:
         language: Target language code
@@ -204,7 +182,7 @@ async def create_or_update_entry(
         CreateEntryResponse confirming creation/update
 
     Raises:
-        HTTPException: 404 if dictionary not found, 500 on database error
+        HTTPException: 500 on database error
     """
     try:
         language_code = language.lower().replace(' ', '_').replace('-', '_')
@@ -213,36 +191,31 @@ async def create_or_update_entry(
         database = db.get_database()
         dictionaries = database[Collection.DICTIONARIES]
 
-        # Get the human dictionary document
-        human_doc = await dictionaries.find_one({
-            "language_code": language_code,
-            "translation_type": TranslationType.HUMAN
-        })
+        # Get the dictionary document
+        doc = await dictionaries.find_one({"language_code": language_code})
 
-        if not human_doc:
+        if not doc:
             # Create new dictionary document (upsert pattern)
-            logger.info(f"Creating new human dictionary for {language_code}")
+            logger.info(f"Creating new dictionary for {language_code}")
             new_doc = {
                 "language_code": language_code,
                 "language_name": language_code.replace('_', ' ').title(),
-                "translation_type": TranslationType.HUMAN,
-                "dictionary_name": f"{language_code.replace('_', ' ').title()} Human Dictionary",
+                "dictionary_name": f"{language_code.replace('_', ' ').title()} Dictionary",
                 "entries": [],
                 "entry_count": 0,
                 "created_at": datetime.utcnow(),
                 "categories": ["noun", "verb", "adjective", "adverb", "other"],
                 "metadata": {
-                    "description": f"Human-curated dictionary for {language_code}",
+                    "description": f"Dictionary for {language_code}",
                     "version": "1.0",
                     "status": "active",
-                    "generation_method": "human"
                 }
             }
             await dictionaries.insert_one(new_doc)
-            human_doc = new_doc
+            doc = new_doc
 
         # Check if word already exists
-        existing_entries = human_doc.get("entries", [])
+        existing_entries = doc.get("entries", [])
         existing_index = next(
             (i for i, e in enumerate(existing_entries) if e.get("word", "").lower() == word_normalized),
             None
@@ -262,23 +235,15 @@ async def create_or_update_entry(
             # Update existing entry
             new_entry["created_at"] = existing_entries[existing_index].get("created_at", now)
             result = await dictionaries.update_one(
-                {
-                    "language_code": language_code,
-                    "translation_type": TranslationType.HUMAN
-                },
-                {
-                    "$set": {f"entries.{existing_index}": new_entry}
-                }
+                {"language_code": language_code},
+                {"$set": {f"entries.{existing_index}": new_entry}}
             )
             action = "updated"
         else:
             # Create new entry
             new_entry["created_at"] = now
             result = await dictionaries.update_one(
-                {
-                    "language_code": language_code,
-                    "translation_type": TranslationType.HUMAN
-                },
+                {"language_code": language_code},
                 {
                     "$push": {"entries": new_entry},
                     "$inc": {"entry_count": 1}
@@ -293,6 +258,12 @@ async def create_or_update_entry(
             )
 
         logger.info(f"{action.capitalize()} dictionary entry '{word_normalized}' for {language_code}")
+
+        # Update in_dictionary flags in word index (targeted, not full rebuild)
+        try:
+            await sync_dictionary_flags(db, language_code, words=[word_normalized])
+        except Exception as e:
+            logger.warning(f"Word index dictionary sync failed (non-fatal): {e}")
 
         return CreateEntryResponse(
             success=True,
@@ -317,13 +288,10 @@ async def verify_dictionary_entry(
     """
     Update human_verified status for a dictionary entry.
 
-    Can verify either human or AI entries based on translation_type.
-    Used for Scenario 2: AI is correct, just verify without editing.
-
     Args:
         language: Target language code
         word: The word to verify
-        request: Contains translation_type and human_verified status
+        request: Contains human_verified status
 
     Returns:
         VerifyEntryResponse confirming the update
@@ -334,21 +302,17 @@ async def verify_dictionary_entry(
     try:
         language_code = language.lower().replace(' ', '_').replace('-', '_')
         word_normalized = word.strip().lower()
-        translation_type = request.translation_type
 
         database = db.get_database()
         dictionaries = database[Collection.DICTIONARIES]
 
-        # Get the specified dictionary document
-        doc = await dictionaries.find_one({
-            "language_code": language_code,
-            "translation_type": translation_type
-        })
+        # Get the dictionary document
+        doc = await dictionaries.find_one({"language_code": language_code})
 
         if not doc:
             raise HTTPException(
                 status_code=404,
-                detail=f"{translation_type.capitalize()} dictionary not found for {language}"
+                detail=f"Dictionary not found for {language}"
             )
 
         # Find entry index
@@ -361,15 +325,12 @@ async def verify_dictionary_entry(
         if entry_index is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"Entry '{word}' not found in {translation_type} dictionary"
+                detail=f"Entry '{word}' not found in dictionary"
             )
 
         # Update verification status
         result = await dictionaries.update_one(
-            {
-                "language_code": language_code,
-                "translation_type": translation_type
-            },
+            {"language_code": language_code},
             {
                 "$set": {
                     f"entries.{entry_index}.human_verified": request.human_verified,
@@ -385,7 +346,7 @@ async def verify_dictionary_entry(
             )
 
         logger.info(
-            f"Updated verification for '{word_normalized}' in {translation_type} "
+            f"Updated verification for '{word_normalized}' in "
             f"dictionary for {language_code}: {request.human_verified}"
         )
 
@@ -393,7 +354,6 @@ async def verify_dictionary_entry(
             success=True,
             word=word_normalized,
             language_code=language_code,
-            translation_type=translation_type,
             human_verified=request.human_verified
         )
 

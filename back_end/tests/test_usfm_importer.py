@@ -15,6 +15,7 @@ from utils.usfm_parser.usfm_importer import (
     import_usfm_directory_to_mongodb,
 )
 from utils.usfm_parser.usfm_parser import ParsedVerse
+from utils.html_parser.html_importer import import_html_to_mongodb
 
 
 # Sample USFM content for testing
@@ -75,32 +76,26 @@ class TestVerseToDocument:
 
     def test_english_verse_document(self, sample_verse):
         """English verses should populate english_text field."""
-        doc = _verse_to_document(sample_verse, "english", "human")
+        doc = _verse_to_document(sample_verse, "english")
 
         assert doc["language_code"] == "english"
         assert doc["book_code"] == "genesis"
         assert doc["chapter"] == 1
         assert doc["verse"] == 1
-        assert doc["translation_type"] == "human"
         assert doc["english_text"] == "In the beginning"
         assert doc["translated_text"] == ""
 
     def test_non_english_verse_document(self, sample_verse):
         """Non-English verses should populate translated_text field."""
-        doc = _verse_to_document(sample_verse, "kope", "human")
+        doc = _verse_to_document(sample_verse, "kope")
 
         assert doc["language_code"] == "kope"
         assert doc["english_text"] == ""
         assert doc["translated_text"] == "In the beginning"
 
-    def test_ai_translation_type(self, sample_verse):
-        """Should handle AI translation type."""
-        doc = _verse_to_document(sample_verse, "english", "ai")
-        assert doc["translation_type"] == "ai"
-
     def test_document_has_timestamp(self, sample_verse):
         """Document should have updated_at timestamp."""
-        doc = _verse_to_document(sample_verse, "english", "human")
+        doc = _verse_to_document(sample_verse, "english")
         assert "updated_at" in doc
         assert isinstance(doc["updated_at"], datetime)
 
@@ -144,7 +139,6 @@ class TestImportUSFMToMongoDB:
         result = await import_usfm_to_mongodb(
             temp_usfm_file,
             language_code="english",
-            translation_type="human",
             connector=mock_connector
         )
 
@@ -323,7 +317,7 @@ class TestLanguageCodeHandling:
             raw_text="raw",
             clean_text="In the beginning"
         )
-        doc = _verse_to_document(verse, "english", "human")
+        doc = _verse_to_document(verse, "english")
 
         assert doc["english_text"] == "In the beginning"
         assert doc["translated_text"] == ""
@@ -339,7 +333,253 @@ class TestLanguageCodeHandling:
             raw_text="raw",
             clean_text="Au commencement"  # French translation
         )
-        doc = _verse_to_document(verse, "french", "human")
+        doc = _verse_to_document(verse, "french")
 
         assert doc["english_text"] == ""
         assert doc["translated_text"] == "Au commencement"
+
+
+# ---------------------------------------------------------------------------
+# Sample HTML content for HTML import tests
+# ---------------------------------------------------------------------------
+
+SAMPLE_HTML = """<!DOCTYPE html>
+<html>
+<body>
+<p id="GEN-1-1">In the beginning God created the heavens and the earth.</p>
+<p id="GEN-1-2">Now the earth was without shape and empty.</p>
+</body>
+</html>
+"""
+
+
+def _make_mock_connector():
+    """Build a reusable mock MongoDB connector."""
+    connector = MagicMock()
+    connector.connect = AsyncMock()
+    connector.disconnect = AsyncMock()
+
+    mock_collection = MagicMock()
+    mock_bulk_result = MagicMock()
+    mock_bulk_result.upserted_count = 2
+    mock_bulk_result.modified_count = 0
+    mock_collection.bulk_write = AsyncMock(return_value=mock_bulk_result)
+
+    mock_db = MagicMock()
+    mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+    connector.get_database = MagicMock(return_value=mock_db)
+
+    return connector, mock_collection
+
+
+class TestHumanVerifiedFlagVerseToDocument:
+    """Unit tests for human_verified in _verse_to_document (pure function)."""
+
+    @pytest.fixture
+    def sample_verse(self):
+        return ParsedVerse(
+            book_code="genesis",
+            book_name="Genesis",
+            usfm_code="GEN",
+            chapter=1,
+            verse=1,
+            raw_text="raw",
+            clean_text="In the beginning"
+        )
+
+    def test_default_is_unverified(self, sample_verse):
+        """Omitting human_verified should default to False."""
+        doc = _verse_to_document(sample_verse, "english")
+        assert doc["human_verified"] is False
+
+    def test_human_verified_false(self, sample_verse):
+        """Explicit human_verified=False should store False."""
+        doc = _verse_to_document(sample_verse, "english", human_verified=False)
+        assert doc["human_verified"] is False
+
+    def test_human_verified_true(self, sample_verse):
+        """human_verified=True should store True."""
+        doc = _verse_to_document(sample_verse, "english", human_verified=True)
+        assert doc["human_verified"] is True
+
+    def test_human_verified_does_not_affect_text_fields(self, sample_verse):
+        """Setting human_verified=True should not change text fields."""
+        doc_unverified = _verse_to_document(sample_verse, "english", human_verified=False)
+        doc_verified = _verse_to_document(sample_verse, "english", human_verified=True)
+        assert doc_verified["english_text"] == doc_unverified["english_text"]
+        assert doc_verified["translated_text"] == doc_unverified["translated_text"]
+
+
+class TestHumanVerifiedFlagImportUSFM:
+    """Tests for human_verified propagation through import_usfm_to_mongodb."""
+
+    @pytest.fixture
+    def temp_usfm_file(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.usfm', delete=False, encoding='utf-8') as f:
+            f.write(SAMPLE_USFM)
+            temp_path = f.name
+        yield Path(temp_path)
+        os.unlink(temp_path)
+
+    @pytest.fixture
+    def temp_usfm_directory(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            gen_path = Path(temp_dir) / "01-GEN.usfm"
+            with open(gen_path, 'w', encoding='utf-8') as f:
+                f.write(SAMPLE_USFM)
+            yield Path(temp_dir)
+
+    @pytest.mark.asyncio
+    async def test_import_with_human_verified_true(self, temp_usfm_file):
+        """human_verified=True should be set in $set doc for every verse."""
+        connector, mock_collection = _make_mock_connector()
+
+        with patch('utils.usfm_parser.usfm_importer._verse_to_document',
+                   wraps=_verse_to_document) as spy:
+            await import_usfm_to_mongodb(
+                temp_usfm_file,
+                language_code="kope",
+                human_verified=True,
+                connector=connector
+            )
+            for call in spy.call_args_list:
+                assert call.kwargs.get('human_verified') is True
+
+    @pytest.mark.asyncio
+    async def test_import_with_human_verified_false(self, temp_usfm_file):
+        """human_verified=False (default) should be set in $set doc for every verse."""
+        connector, mock_collection = _make_mock_connector()
+
+        with patch('utils.usfm_parser.usfm_importer._verse_to_document',
+                   wraps=_verse_to_document) as spy:
+            await import_usfm_to_mongodb(
+                temp_usfm_file,
+                language_code="kope",
+                human_verified=False,
+                connector=connector
+            )
+            for call in spy.call_args_list:
+                assert call.kwargs.get('human_verified') is False
+
+    @pytest.mark.asyncio
+    async def test_reimport_overwrites_human_verified(self, temp_usfm_file):
+        """Re-import with different human_verified value should pass new value to documents."""
+        connector, mock_collection = _make_mock_connector()
+
+        # First import: verified
+        with patch('utils.usfm_parser.usfm_importer._verse_to_document',
+                   wraps=_verse_to_document) as spy:
+            await import_usfm_to_mongodb(
+                temp_usfm_file, language_code="kope",
+                human_verified=True, connector=connector
+            )
+            for call in spy.call_args_list:
+                assert call.kwargs.get('human_verified') is True
+
+        # Second import: unverified — should overwrite
+        mock_collection.bulk_write.reset_mock()
+        with patch('utils.usfm_parser.usfm_importer._verse_to_document',
+                   wraps=_verse_to_document) as spy:
+            await import_usfm_to_mongodb(
+                temp_usfm_file, language_code="kope",
+                human_verified=False, connector=connector
+            )
+            for call in spy.call_args_list:
+                assert call.kwargs.get('human_verified') is False
+
+    @pytest.mark.asyncio
+    async def test_reimport_preserves_other_fields(self, temp_usfm_file):
+        """Re-importing with different human_verified should not change text in the document."""
+        connector, _ = _make_mock_connector()
+
+        captured_docs = []
+
+        original_v2d = _verse_to_document
+
+        def capturing_v2d(verse, language_code, language_name=None, human_verified=False):
+            doc = original_v2d(verse, language_code, language_name, human_verified=human_verified)
+            captured_docs.append(doc)
+            return doc
+
+        with patch('utils.usfm_parser.usfm_importer._verse_to_document', side_effect=capturing_v2d):
+            await import_usfm_to_mongodb(
+                temp_usfm_file, language_code="kope",
+                human_verified=True, connector=connector
+            )
+
+        for doc in captured_docs:
+            assert "translated_text" in doc
+            assert "english_text" in doc
+            assert doc["human_verified"] is True
+
+    @pytest.mark.asyncio
+    async def test_directory_import_passes_human_verified(self, temp_usfm_directory):
+        """import_usfm_directory_to_mongodb should pass human_verified to each file import."""
+        with patch('db_connector.connection.MongoDBConnector') as MockConnector:
+            connector, mock_collection = _make_mock_connector()
+            MockConnector.return_value = connector
+
+            with patch('utils.usfm_parser.usfm_importer._verse_to_document',
+                       wraps=_verse_to_document) as spy:
+                await import_usfm_directory_to_mongodb(
+                    temp_usfm_directory,
+                    language_code="kope",
+                    human_verified=True
+                )
+                assert spy.call_count > 0
+                for call in spy.call_args_list:
+                    assert call.kwargs.get('human_verified') is True
+
+
+class TestHumanVerifiedFlagImportHTML:
+    """Tests for human_verified propagation through the HTML import path.
+
+    Guards against the silent-default bug where html_importer.py calls
+    _verse_to_document without passing human_verified, causing Python's
+    default False to mask the caller's intent.
+    """
+
+    @pytest.fixture
+    def temp_html_file(self):
+        """Create a temporary HTML chapter file with correct naming."""
+        with tempfile.NamedTemporaryFile(
+            mode='w', suffix='.htm', prefix='GEN01', delete=False, encoding='utf-8'
+        ) as f:
+            f.write(SAMPLE_HTML)
+            temp_path = f.name
+        yield Path(temp_path)
+        os.unlink(temp_path)
+
+    @pytest.mark.asyncio
+    async def test_html_import_with_human_verified_true(self, temp_html_file):
+        """human_verified=True should propagate through the HTML import path."""
+        connector, _ = _make_mock_connector()
+
+        with patch('utils.usfm_parser.usfm_importer._verse_to_document',
+                   wraps=_verse_to_document) as spy:
+            await import_html_to_mongodb(
+                temp_html_file,
+                language_code="bughotu",
+                human_verified=True,
+                connector=connector
+            )
+            # If any verses were parsed, all must have human_verified=True
+            if spy.call_count > 0:
+                for call in spy.call_args_list:
+                    assert call.kwargs.get('human_verified') is True
+
+    @pytest.mark.asyncio
+    async def test_html_import_default_is_unverified(self, temp_html_file):
+        """HTML import without human_verified should default to False."""
+        connector, _ = _make_mock_connector()
+
+        with patch('utils.usfm_parser.usfm_importer._verse_to_document',
+                   wraps=_verse_to_document) as spy:
+            await import_html_to_mongodb(
+                temp_html_file,
+                language_code="bughotu",
+                connector=connector
+            )
+            if spy.call_count > 0:
+                for call in spy.call_args_list:
+                    assert call.kwargs.get('human_verified') is False

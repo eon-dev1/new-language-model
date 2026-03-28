@@ -22,7 +22,6 @@ Usage:
     result = asyncio.run(import_usfm_directory_to_mongodb(
         "path/to/usfm/directory/",
         language_code="english",
-        translation_type="human"
     ))
 
 Components:

@@ -42,8 +42,8 @@ class ImportResult:
 def _verse_to_document(
     verse: ParsedVerse,
     language_code: str,
-    translation_type: str,
-    language_name: str = None
+    language_name: str = None,
+    human_verified: bool = False
 ) -> dict:
     """
     Convert a ParsedVerse to a MongoDB document.
@@ -51,7 +51,6 @@ def _verse_to_document(
     Args:
         verse: Parsed verse data
         language_code: Language code (e.g., "english", "kope")
-        translation_type: "human" or "ai"
         language_name: Display name for the language (optional, defaults to language_code)
 
     Returns:
@@ -69,11 +68,10 @@ def _verse_to_document(
         "book_code": verse.book_code,
         "chapter": verse.chapter,
         "verse": verse.verse,
-        "translation_type": translation_type,
         "english_text": verse.clean_text if is_english else "",
         "translated_text": "" if is_english else verse.clean_text,
         "footnotes": verse.footnotes if verse.footnotes else [],
-        "human_verified": False,
+        "human_verified": human_verified,
         "updated_at": now,
     }
 
@@ -84,9 +82,9 @@ async def import_usfm_to_mongodb(
     filepath: Path | str,
     language_code: str = "english",
     language_name: str = None,
-    translation_type: str = "human",
     batch_size: int = 500,
-    connector = None
+    connector = None,
+    human_verified: bool = False
 ) -> ImportResult:
     """
     Import a single USFM file into MongoDB.
@@ -95,7 +93,6 @@ async def import_usfm_to_mongodb(
         filepath: Path to USFM file
         language_code: Target language code (default: "english")
         language_name: Display name for the language (optional)
-        translation_type: "human" or "ai" (default: "human")
         batch_size: Number of documents per batch operation
         connector: Optional MongoDBConnector instance (creates new if None)
 
@@ -137,7 +134,7 @@ async def import_usfm_to_mongodb(
             operations = []
 
             for verse in batch:
-                doc = _verse_to_document(verse, language_code, translation_type, language_name)
+                doc = _verse_to_document(verse, language_code, language_name, human_verified=human_verified)
 
                 # Use upsert to handle existing documents
                 filter_doc = {
@@ -145,7 +142,6 @@ async def import_usfm_to_mongodb(
                     "book_code": verse.book_code,
                     "chapter": verse.chapter,
                     "verse": verse.verse,
-                    "translation_type": translation_type
                 }
 
                 # Build update operation
@@ -191,9 +187,9 @@ async def import_usfm_directory_to_mongodb(
     dirpath: Path | str,
     language_code: str = "english",
     language_name: str = None,
-    translation_type: str = "human",
     batch_size: int = 500,
-    pattern: str = None
+    pattern: str = None,
+    human_verified: bool = False
 ) -> ImportResult:
     """
     Import all USFM files from a directory into MongoDB.
@@ -202,7 +198,6 @@ async def import_usfm_directory_to_mongodb(
         dirpath: Path to directory containing USFM files
         language_code: Target language code (default: "english")
         language_name: Display name for the language (optional)
-        translation_type: "human" or "ai" (default: "human")
         batch_size: Number of documents per batch operation
         pattern: Glob pattern for USFM files. If None, auto-detects (*.usfm, *.SFM, etc.)
 
@@ -250,9 +245,9 @@ async def import_usfm_directory_to_mongodb(
                 usfm_file,
                 language_code=language_code,
                 language_name=language_name,
-                translation_type=translation_type,
                 batch_size=batch_size,
-                connector=connector
+                connector=connector,
+                human_verified=human_verified
             )
 
             result.verses_imported += file_result.verses_imported
@@ -275,7 +270,6 @@ async def import_usfm_directory_to_mongodb(
 
 async def update_bible_books_collection(
     language_code: str = "english",
-    translation_type: str = "human",
     connector = None
 ) -> int:
     """
@@ -286,7 +280,6 @@ async def update_bible_books_collection(
 
     Args:
         language_code: Language to update
-        translation_type: Translation type to update
         connector: Optional MongoDBConnector instance
 
     Returns:
@@ -307,11 +300,10 @@ async def update_bible_books_collection(
         texts_collection = db[BIBLE_TEXTS_COLLECTION]
         books_collection = db[BIBLE_BOOKS_COLLECTION]
 
-        # Get all unique book codes for this language/type
+        # Get all unique book codes for this language
         pipeline = [
             {"$match": {
                 "language_code": language_code,
-                "translation_type": translation_type
             }},
             {"$group": {"_id": "$book_code"}}
         ]
@@ -325,7 +317,6 @@ async def update_bible_books_collection(
             verses_cursor = texts_collection.find({
                 "language_code": language_code,
                 "book_code": book_code,
-                "translation_type": translation_type
             }).sort([("chapter", 1), ("verse", 1)])
 
             # Group by chapter
@@ -358,7 +349,6 @@ async def update_bible_books_collection(
                     {
                         "language_code": language_code,
                         "book_code": book_code,
-                        "translation_type": translation_type
                     },
                     {
                         "$set": {
@@ -380,6 +370,95 @@ async def update_bible_books_collection(
     return books_updated
 
 
+async def sync_bible_books_from_texts(
+    language_code: str,
+    connector=None
+) -> int:
+    """
+    Create or update bible_books entries from bible_texts data.
+
+    Runs after a USFM or HTML import to ensure bible_books has correct
+    total_chapters, total_verses, and metadata for every imported book.
+    Uses upsert — safe to call multiple times.
+
+    Returns number of books upserted.
+    """
+    from db_connector.connection import MongoDBConnector
+    from utils.usfm_parser.usfm_book_codes import (
+        USFM_BOOK_DATA, BOOK_CODE_TO_USFM, get_all_book_codes
+    )
+
+    manage_connection = connector is None
+    books_synced = 0
+
+    try:
+        if manage_connection:
+            connector = MongoDBConnector()
+            await connector.connect()
+
+        db = connector.get_database()
+        texts = db[BIBLE_TEXTS_COLLECTION]
+        books = db[BIBLE_BOOKS_COLLECTION]
+
+        pipeline = [
+            {"$match": {"language_code": language_code}},
+            {"$group": {
+                "_id": "$book_code",
+                "total_verses": {"$sum": 1},
+                "chapters": {"$addToSet": "$chapter"}
+            }}
+        ]
+
+        canonical_order_list = get_all_book_codes()
+        order_map = {code: i + 1 for i, code in enumerate(canonical_order_list)}
+
+        async for doc in texts.aggregate(pipeline):
+            book_code = doc["_id"]
+            total_chapters = len(doc["chapters"])
+            total_verses = doc["total_verses"]
+
+            usfm_code = BOOK_CODE_TO_USFM.get(book_code, "")
+            usfm_entry = USFM_BOOK_DATA.get(usfm_code)
+            book_name = usfm_entry[1] if usfm_entry else book_code
+            canonical_pos = order_map.get(book_code, 999)
+            testament = "old" if canonical_pos <= 39 else "new"
+
+            await books.update_one(
+                {
+                    "language_code": language_code,
+                    "book_code": book_code,
+                },
+                {
+                    "$set": {
+                        "book_name": book_name,
+                        "total_chapters": total_chapters,
+                        "total_verses": total_verses,
+                        "translation_status": "imported",
+                        "metadata.testament": testament,
+                        "metadata.canonical_order": canonical_pos,
+                        "updated_at": datetime.utcnow()
+                    },
+                    "$setOnInsert": {
+                        "language_code": language_code,
+                        "book_code": book_code,
+                        "created_at": datetime.utcnow()
+                    }
+                },
+                upsert=True
+            )
+            books_synced += 1
+
+        logger.info(f"Synced {books_synced} bible_books entries for {language_code}")
+
+    except Exception as e:
+        logger.error(f"Error syncing bible_books for {language_code}: {e}")
+    finally:
+        if manage_connection and connector:
+            await connector.disconnect()
+
+    return books_synced
+
+
 if __name__ == "__main__":
     import sys
 
@@ -390,33 +469,29 @@ if __name__ == "__main__":
 
     async def main():
         if len(sys.argv) < 2:
-            print("Usage: python usfm_importer.py <usfm_file_or_directory> [language_code] [translation_type]")
+            print("Usage: python usfm_importer.py <usfm_file_or_directory> [language_code]")
             print("\nExamples:")
             print("  python usfm_importer.py data/bibles/engnet_usfm/")
-            print("  python usfm_importer.py 02-GENengnet.usfm english human")
+            print("  python usfm_importer.py 02-GENengnet.usfm english")
             sys.exit(1)
 
         path = Path(sys.argv[1])
         language_code = sys.argv[2] if len(sys.argv) > 2 else "english"
-        translation_type = sys.argv[3] if len(sys.argv) > 3 else "human"
 
         print(f"Importing USFM data to MongoDB")
         print(f"  Path: {path}")
         print(f"  Language: {language_code}")
-        print(f"  Translation Type: {translation_type}")
         print("-" * 50)
 
         if path.is_file():
             result = await import_usfm_to_mongodb(
                 path,
                 language_code=language_code,
-                translation_type=translation_type
             )
         elif path.is_dir():
             result = await import_usfm_directory_to_mongodb(
                 path,
                 language_code=language_code,
-                translation_type=translation_type
             )
         else:
             print(f"Path not found: {path}")
