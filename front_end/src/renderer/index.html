@@ -1,0 +1,18 @@
+<!-- src/renderer/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      Content Security Policy for secure Electron app:
+      - connect-src: allows API calls to backend only
+      - No file: protocol needed since credentials are handled by main process
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:8221;">
+    <title>New Language Model</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="index.tsx"></script>
+  </body>
+</html>

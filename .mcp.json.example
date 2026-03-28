@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "nlm-database": {
+      "command": "virtual_environment_filepath/bin/python",
+      "args": ["-m", "mcp_server.server"],
+      "cwd": "project/filepath/back_end",
+      "env": {
+        "PYTHONPATH": "project/filepath/back_end"
+      }
+    }
+  }
+}
