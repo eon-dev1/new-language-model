@@ -20,7 +20,7 @@ pip install "mcp[cli]" httpx
 
 **Requirements:**
 - Python 3.10+
-- MCP SDK version 1.25.0 or higher
+- MCP SDK `>=1.0.0,<2.0.0` (pinned in `requirements.txt`)
 
 ---
 

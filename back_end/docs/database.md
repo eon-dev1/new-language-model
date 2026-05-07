@@ -12,7 +12,7 @@
 
 ## Database Overview
 
-**Database Name**: `nlm_db`
+**Database Name**: `nlm_translator` (default; overridden by `DATABASE_NAME` in `~/.nlm/mongodb_credentials.env`)
 
 The NLM platform uses MongoDB as its primary database, storing Bible translations, dictionaries, and grammar systems for multiple languages.
 

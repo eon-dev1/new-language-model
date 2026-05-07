@@ -25,5 +25,10 @@ interface Window {
      * @returns Selected folder path, or null if cancelled
      */
     selectFolder: () => Promise<string | null>;
+    /**
+     * Open a URL in the user's default external browser.
+     * Main-process handler enforces https:// only.
+     */
+    openExternal: (url: string) => Promise<void>;
   };
 }

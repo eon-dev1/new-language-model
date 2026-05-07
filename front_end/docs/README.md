@@ -4,42 +4,21 @@
 
 The NLM (New Language Model) front-end is an Electron desktop application built with React and TypeScript for managing biblical translation projects. It provides a modern, futuristic interface for creating and managing language projects with support for Bible reading, dictionary management, and translation memories.
 
-## Quick Start
+## Setup
 
-### Prerequisites
+See the [repo root README](../../README.md) for full setup instructions (npm install, Python venv, MongoDB credentials, `npm run dev`).
 
-- Node.js (v18 or later recommended)
-- npm (v9 or later)
-
-### Installation
+## Production Build
 
 ```bash
 cd front_end
-npm install
-```
-
-### Development
-
-Start the development environment with hot-reload:
-
-```bash
-npm run dev
-```
-
-This command runs three processes concurrently:
-1. Webpack watcher for the main process
-2. Vite dev server for the renderer process
-3. Electron application (starts after main process builds)
-
-### Production Build
-
-```bash
 npm run build
 ```
 
-### Running Tests
+## Running Tests
 
 ```bash
+cd front_end
 npm test              # All tests (main + renderer, single run)
 npm run test:main     # Main process tests only
 npm run test:renderer # Renderer tests only
@@ -48,16 +27,16 @@ npm run test:coverage # With coverage report
 
 ## Technology Stack
 
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| Electron | 39.2.4 | Desktop application framework |
-| React | 18.2.0 | UI component library |
-| TypeScript | 5.4.0 | Type-safe JavaScript |
-| Material-UI | 5.18.0 | Component library |
-| Framer Motion | 10.18.0 | Animation library |
-| Vite | 7.0.4 | Renderer process bundler |
-| Webpack | 5.91.0 | Main process bundler |
-| Vitest | 3.2.4 | Test framework |
+| Technology | Purpose |
+|------------|---------|
+| Electron | Desktop application framework |
+| React | UI component library |
+| TypeScript | Type-safe JavaScript |
+| Material-UI | Component library |
+| Framer Motion | Animation library |
+| Vite | Renderer process bundler |
+| Webpack | Main process bundler |
+| Vitest | Test framework |
 
 ## Project Structure
 
@@ -77,7 +56,6 @@ front_end/
 │   │   ├── app.tsx              # Root component with TopBar and ChatDrawer
 │   │   ├── Homepage.tsx         # Language project list, create project
 │   │   ├── TopBar.tsx           # Custom frameless window title bar
-│   │   ├── TypewriterText.tsx   # Animated text component
 │   │   ├── constants.ts         # Shared renderer constants
 │   │   ├── api.ts               # Backend API communication
 │   │   ├── types/               # TypeScript interfaces
@@ -156,9 +134,9 @@ The front-end connects to the NLM FastAPI backend:
 
 | Setting | Value |
 |---------|-------|
-| Endpoint | `http://localhost:8221/api/` |
+| Endpoint | `http://127.0.0.1:8221/api` |
 | Authentication | None (localhost-only binding) |
-| Configuration | `VITE_API_BASE_URL` in `.env` file |
+| Configuration | Hardcoded in `src/renderer/api.ts` |
 
 See [API Layer](./api-layer.md) for detailed communication patterns.
 

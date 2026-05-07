@@ -16,6 +16,8 @@ The NLM Backend follows a layered architecture designed for async operations, se
 |                     FASTAPI APPLICATION                           |
 |  main.py                                                          |
 |  +------------------------------------------------------------+  |
+|  |  TrustedHostMiddleware (127.0.0.1 / localhost only)        |  |
+|  +------------------------------------------------------------+  |
 |  |  Request ID Middleware (request_id_middleware)              |  |
 |  +------------------------------------------------------------+  |
 |  |  Routes (20 total, including):                              |  |
@@ -56,7 +58,7 @@ The NLM Backend follows a layered architecture designed for async operations, se
                               v
 +------------------------------------------------------------------+
 |                    MONGODB                                        |
-|  Database: nlm_db (default; set via DATABASE_NAME)               |
+|  Database: nlm_translator (default; set via DATABASE_NAME)        |
 |  +------------------------------------------------------------+  |
 |  |  Collections:                                               |  |
 |  |  - languages          - bible_books                         |  |
@@ -75,7 +77,7 @@ The NLM Backend follows a layered architecture designed for async operations, se
 **Responsibilities**:
 - Initialize FastAPI application with metadata
 - Register 20 route handlers with `/api` prefix
-- Attach request ID middleware for log tracing
+- Attach two middleware layers for security and log tracing
 - Start Uvicorn server on localhost:8221
 
 **Note**: API authentication has been disabled. No `verify_api_key` or Bearer token is required. MongoDB provides its own authentication layer.
@@ -85,7 +87,10 @@ The NLM Backend follows a layered architecture designed for async operations, se
 # Route registration — no auth dependency
 app.include_router(new_language_router, prefix="/api")
 
-# Only middleware: attaches a short UUID to each request for log correlation
+# Middleware (LIFO execution order — TrustedHost runs outermost/first):
+# 1. TrustedHostMiddleware: blocks requests not from 127.0.0.1 or localhost
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+# 2. request_id_middleware: attaches a short UUID to each request for log correlation
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next): ...
 
@@ -98,31 +103,24 @@ FAST_API_PORT = int(os.getenv('FAST_API_PORT', 8221))
 #### settings.py - Credential and Configuration Management
 
 **Responsibilities**:
-- Implement two-tier credential loading
+- Load credentials from `~/.nlm/mongodb_credentials.env`
 - Validate MongoDB connection strings
 - Configure connection pool settings
 - Provide connection options for Motor client
 
-**Two-Tier Credential System Flow**:
+**Credential Loading Flow**:
 ```
 +---------------------------------------+
-| db_connector/mongo_credentials_path.env|
-| (Tier 1 - In Repository)               |
-| - MONGODB_CREDENTIALS_PATH             |
-| - DATABASE_NAME                        |
-+---------------------------------------+
-            |
-            | Contains path to:
-            v
-+---------------------------------------+
-| Actual Credentials File                |
-| (Tier 2 - External, secure location)   |
-| - MONGODB_CONNECTION_STRING            |
+| ~/.nlm/mongodb_credentials.env        |
+| (external — never in repository)      |
+| - MONGODB_CONNECTION_STRING (required)|
+| - DATABASE_NAME (optional)            |
 +---------------------------------------+
             |
             v
 +---------------------------------------+
 | MongoDBSettings Instance               |
+| database_name default: "nlm_translator"|
 +---------------------------------------+
 ```
 
@@ -328,7 +326,7 @@ Client Request
 
 1. **Localhost Binding**: Server only binds to 127.0.0.1 (no external access)
 2. **MongoDB Authentication**: Database operations use MongoDB's auth layer
-3. **Credential Isolation**: Two-tier system keeps secrets out of repository
+3. **Credential Isolation**: Credentials stored in `~/.nlm/` outside the repository
 4. **Input Validation**: Language names validated against regex pattern
 
 ## Configuration Flow
@@ -340,18 +338,16 @@ Client Request
 +-------------------------------------------+
 
 +-------------------------------------------+     +----------------------+
-| db_connector/mongo_credentials_path.env   | --> | MongoDBSettings      |
-| (Tier 1 - in repository)                  |     | Two-tier Loading     |
-| - MONGODB_CREDENTIALS_PATH                |     | - Connection String  |
-| - DATABASE_NAME                           |     | - Database Name      |
-+-------------------------------------------+     +----------------------+
-        |                                                    |
-        v                                                    v
-+-------------------------------------------+     +----------------------+
-| Actual Credentials File (Tier 2)          |     | MongoDBConnector     |
-| (external, not in repository)             |     | Initialized          |
-| - MONGODB_CONNECTION_STRING               |     +----------------------+
-+-------------------------------------------+
+| ~/.nlm/mongodb_credentials.env            | --> | MongoDBSettings      |
+| (external — never in repository)          |     | - Connection String  |
+| - MONGODB_CONNECTION_STRING (required)    |     | - Database Name      |
+| - DATABASE_NAME (optional)                |     +----------------------+
++-------------------------------------------+              |
+                                                            v
+                                                 +----------------------+
+                                                 | MongoDBConnector     |
+                                                 | Initialized          |
+                                                 +----------------------+
 ```
 
 ## Error Handling Strategy

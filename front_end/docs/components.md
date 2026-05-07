@@ -19,14 +19,26 @@ src/
 │       └── createDynamicTheme.ts # Dynamic MUI theme factory
 │
 └── components/
-    ├── LanguageProject.tsx   # Project overview with resource navigation
-    ├── BibleReader.tsx       # Three-view Bible navigation
-    ├── DictionaryViewer.tsx  # Dictionary viewer and editor
-    ├── GrammarViewer.tsx     # Five-category grammar viewer
-    ├── MemoriesViewer.tsx    # Grammar/notes/memories viewer
-    ├── ChatDrawer.tsx        # AI chat side panel
-    ├── NewProjectDialog.tsx  # Project creation with Bible import
-    └── ProjectResources.tsx  # Legacy resource detail viewer (unused)
+    ├── LanguageProject.tsx        # Project overview with resource navigation
+    ├── BibleReader.tsx            # Three-view Bible navigation
+    ├── DictionaryViewer.tsx       # Dictionary viewer and editor
+    ├── GrammarViewer.tsx          # Five-category grammar viewer
+    ├── MemoriesViewer.tsx         # Grammar/notes/memories viewer
+    ├── ChatDrawer.tsx             # AI chat side panel
+    ├── ChatMessage.tsx            # Individual chat message renderer
+    ├── ChatSettings.tsx           # Chat provider/model settings panel
+    ├── NewProjectDialog.tsx       # Project creation with Bible import
+    ├── BaseLanguageDialog.tsx     # Base language selection dialog
+    ├── NotesTab.tsx               # Language notes tab (Memories)
+    ├── CorrectionLogTab.tsx       # Correction log tab (Memories)
+    ├── ToolApprovalCard.tsx       # Tool call approval UI card
+    ├── ToolDataPreview.tsx        # Tool result data preview
+    ├── VerseSelectionToolbar.tsx  # Multi-verse batch selection toolbar
+    ├── VerseTranslationCell.tsx   # Per-verse translation cell
+    ├── CopyIconButton.tsx         # Reusable copy-to-clipboard button
+    ├── useBatchTranslation.ts     # Batch translation state hook
+    ├── searchFilters.ts           # Type guards and search filter helpers
+    └── ProjectResources.tsx       # Legacy resource detail viewer (unused)
 ```
 
 ---
@@ -152,8 +164,7 @@ export const TopBar: React.FC = () => { ... };
 
 | State | Type | Description |
 |-------|------|-------------|
-| `anchor` | `HTMLElement \| null` | Main menu anchor element |
-| `viewSubmenu` | `HTMLElement \| null` | View submenu anchor element |
+| `anchor` | `HTMLElement \| null` | Hamburger menu anchor element |
 | `settingsOpen` | `boolean` | SettingsDialog visibility |
 
 ### Features
@@ -164,8 +175,9 @@ export const TopBar: React.FC = () => { ... };
    - Close button (`window.api.close()`)
 
 2. **Application Menu**
-   - Hamburger menu icon opens a dropdown (File, Edit, View, Help)
-   - View submenu contains "Show Console Log" and "Settings"
+   - Hamburger menu icon opens a flat dropdown: File, Edit, Help, Settings, Support
+   - Settings opens `SettingsDialog`
+   - Support opens `window.api.openExternal(url)` in the system browser
 
 3. **Chat Toggle**
    - Chat icon button calls `toggleChat()` from `ChatContext`

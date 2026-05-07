@@ -1,28 +1,8 @@
-The New Language Model uses context engineering to facilitate Bible translation. 
+# NLM Bible Translation Platform
 
-The translation cycle will start with any amount of parallel Bible translation, and can also start with an imported dictionary or grammar outline, called Source Materials. (Future imports from Webonary.org are planned)
+A desktop application for managing Bible translation projects in low-resource languages. Built with Electron, React, FastAPI, and MongoDB, with AI-assisted translation via local LLMs, OpenRouter, or Anthropic API 
 
-These Source Materials will each come in to tiers: human-verified, and AI-drafted. The bible, dictionary, and grammar are imported into MongoDB and comes equiped with tools that an AI agent can call to begin assisting translation. 
-
-Example prompt , "Compare parallell translations of Matthew - Luke, and generate a dictionary for words that don't yet have entries". (Quick prompts can be configured to send prompt templates like this) The AI will produce dictionary drafts which the human translator can verify in the GUI. Verified entries have higher confidence scores when feeding them as context for future queries. 
-
-Another example "Create a draft of John 1 - 5 from available data" - the AI will query verses that have parallell translations already, and query the dictionary and grammar documents, giving higher condfidence to human-verified entries. The AI will then make MCP tool calls to update the database with translation drafts. 
-
-**This project is in early development. Expect breaking changes**
-
-Future Plans
-- Import/export connection with Paratext and Paranext
-- Import connection with Webonary
-- One click import of webonary.org dictionaries
-- Local LLM integration (not yet fully tested)
-- Multi-agent coordination
-- Multi-user team-based projects
-- Delete, Undo, change history & restore functions
-
-Known Issues
-- So far tested only on Ubuntu 24.04, not yet Windows/Mac compatible
-- UI is not fully wired up to human-initiated edits
-- Memory reading and writing not fully implemented yet
+Translators work through a three-resource model per language: **Bible texts** (verse-by-verse with human verification), **Dictionary** (building a lexicon as you translate), and **Memories** (grammar notes, language observations, correction history). An integrated chat interface connects to Claude or a local LLM for context-aware translation assistance with tool use.
 
 ## Architecture
 
@@ -54,7 +34,9 @@ Known Issues
 ## Prerequisites
 
 - **Node.js** 18+ and npm 9+
-- **Python** 3.12+
+- **Python** 3.10+
+
+**Platform support:** Tested on Ubuntu 22.04 and Windows. Other Linux distributions are likely compatible but untested. macOS is not yet supported or tested — planned for a future release.
 
 ## Quick Start
 
@@ -65,46 +47,77 @@ cd front_end
 npm install
 ```
 
-### 2. Set up MongoDB credentials
+### 2. Set up the Python virtual environment
 
 ```bash
+cd back_end
+python -m venv nlm_backend_venv
+```
+
+Activate it:
+
+```bash
+# Windows
+nlm_backend_venv\Scripts\activate
+
+# Linux
+source nlm_backend_venv/bin/activate
+```
+
+Then install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Create the MongoDB credentials file
+
+The backend reads `~/.nlm/mongodb_credentials.env` directly. Create it with:
+
+```bash
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force "$HOME\.nlm" | Out-Null
+'MONGODB_CONNECTION_STRING="mongodb://localhost:27019"' | Set-Content -Encoding utf8 "$HOME\.nlm\mongodb_credentials.env"
+
+# Linux
 mkdir -p ~/.nlm
 echo 'MONGODB_CONNECTION_STRING="mongodb://localhost:27019"' > ~/.nlm/mongodb_credentials.env
 chmod 600 ~/.nlm/mongodb_credentials.env
 ```
 
-Then update the pointer file at `back_end/db_connector/mongo_credentials_path.env`:
+The default URI (`mongodb://localhost:27019`) works with the bundled mongod — no edit needed for local dev. For MongoDB Atlas, replace with your cluster URI. `DATABASE_NAME` is optional and defaults to `nlm_translator`.
 
-```env
-MONGODB_CREDENTIALS_PATH='/home/YOUR_USER/.nlm/mongodb_credentials.env'
-DATABASE_NAME='nlm_db'
+### 4. Add Bible source data
+
+The `data/` directory is gitignored. Bible import will not work until USFM source directories are present:
+
+```
+data/bibles/
+├── eng-web_usfm/    # English World English Bible (base language)
+└── bgt_usfm/        # (or other target language USFM directories)
 ```
 
-### 3. Install backend dependencies
+Populate these manually from your source files before importing via the app. This step will be automated in a future setup script.
 
-```bash
-cd back_end
-python -m venv nlm_backend_venv
-source nlm_backend_venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 4. Launch the app
+### 5. Launch the app
 
 ```bash
 cd front_end
 npm run dev
 ```
 
-This starts three npm processes concurrently (webpack watcher, Vite dev server, Electron app). On first run, the `predev` hook downloads a MongoDB binary to `~/.nlm/bin/`. The Electron main process then automatically starts:
+This starts webpack, Vite, and Electron concurrently. On first run, the `predev` hook downloads a MongoDB binary to `~/.nlm/bin/`. Electron then automatically starts:
 1. **MongoDB** (`~/.nlm/bin/mongod` on port 27019)
 2. **FastAPI backend** (`python main.py` on port 8221)
 
-### 5. Configure AI chat (optional)
+All persistent data — the MongoDB database with your imported Bibles, dictionaries, and translation work — lives in `~/.nlm/db/`, outside the repo. Back this directory up if you want to preserve your work across machines or OS reinstalls.
 
-On first launch, open **Settings > Chat Config** in the app to set your LLM provider:
+### 6. Configure AI chat (optional)
+
+On first launch, open **Settings > Chat Config** to set your LLM provider:
 
 - **Anthropic**: Enter your API key and select a model (default: `claude-sonnet-4-6`)
+- **OpenRouter**: Enter your OpenRouter API key and model identifier (default: `anthropic/claude-sonnet-4.6`)
 - **Local LLM**: Set the base URL (default: `http://127.0.0.1:8080`) — requires a local server implementing the Anthropic Messages API (e.g., llama.cpp)
 
 Config is stored at `~/.nlm/chat_config.json` (auto-created with defaults on first use).
@@ -149,7 +162,7 @@ npm run test:coverage # With coverage report
 ## Project Structure
 
 ```
-+-- back_end/               # FastAPI backend (Python)
+back_end/               # FastAPI backend (Python)
 |   +-- main.py             # Entry point, 20 route registrations
 |   +-- routes/             # REST API handlers
 |   +-- shared/             # LLM tool loop, tool registry, chat config
@@ -171,7 +184,6 @@ npm run test:coverage # With coverage report
 |   +-- dictionaries/       # Language dictionaries
 |
 +-- local_llm/              # Local LLM setup (llama.cpp)
-+-- __plans__/              # Development planning documents
 ```
 
 ## Documentation
@@ -196,18 +208,8 @@ npm run test:coverage # With coverage report
 | Desktop | Electron 39 |
 | Frontend | React 18, TypeScript, Material-UI 5 |
 | Build | Vite (renderer), Webpack (main process) |
-| Backend | FastAPI, Uvicorn, Python 3.12+ |
+| Backend | FastAPI, Uvicorn, Python 3.10+ |
 | Database | MongoDB (bundled binary), Motor async driver |
 | AI | Anthropic Claude API, local LLM via llama.cpp |
-| MCP | Model Context Protocol server for Claude Code |
+| MCP | Model Context Protocol server for Claude Code or Claude Desktop/Cowork |
 | Tests | pytest (backend), Vitest (frontend) |
-
-
-- Preview:
-<img width="1338" height="736" alt="image" src="https://github.com/user-attachments/assets/e2f8c0cd-db8b-4255-8867-68e23a351446" />
-
-<img width="1413" height="736" alt="image" src="https://github.com/user-attachments/assets/6f0cbe2c-4293-4e61-a55b-2ea07eae5451" />
-
-<img width="1221" height="855" alt="image" src="https://github.com/user-attachments/assets/16b44b83-9b0e-4edf-b54d-7fe101d7d963" />
-
-

@@ -23,8 +23,11 @@ class ChatConfigUpdate(BaseModel):
     llm_provider: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     anthropic_model: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
+    openrouter_model: Optional[str] = None
     local_base_url: Optional[str] = None
     local_model: Optional[str] = None
+    thinking_enabled: Optional[bool] = None
 
 
 @router.get("/chat/config")

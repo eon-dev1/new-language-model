@@ -19,13 +19,18 @@ logger = logging.getLogger(__name__)
 CONFIG_DIR = Path.home() / ".nlm"
 CONFIG_FILE = CONFIG_DIR / "chat_config.json"
 
+# DEFAULT_CONFIG doubles as the allowlist for update_config() —
+# only keys present here are accepted when saving config updates.
 DEFAULT_CONFIG = {
     "llm_provider": "anthropic",
     "anthropic_api_key": "",
     "anthropic_model": "claude-sonnet-4-6",
+    "openrouter_api_key": "",
+    "openrouter_model": "anthropic/claude-sonnet-4.6",
     "local_base_url": "http://127.0.0.1:8080",
     "local_model": "default",
     "local_context_window": 128000,
+    "thinking_enabled": True,
     "dev_features": {},
 }
 
@@ -45,7 +50,7 @@ def load_config() -> dict[str, Any]:
         return dict(DEFAULT_CONFIG)
 
     try:
-        data = json.loads(CONFIG_FILE.read_text())
+        data = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
         # Merge with defaults to handle new keys added in future versions
         merged = dict(DEFAULT_CONFIG)
         merged.update(data)
@@ -58,7 +63,7 @@ def load_config() -> dict[str, Any]:
 def save_config(config: dict[str, Any]) -> None:
     """Save chat config to disk."""
     _ensure_config_dir()
-    CONFIG_FILE.write_text(json.dumps(config, indent=2))
+    CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding='utf-8')
     CONFIG_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600 — owner read/write only
 
 
@@ -91,13 +96,18 @@ def get_public_config() -> dict[str, Any]:
     """
     config = load_config()
     api_key = config.get("anthropic_api_key", "")
+    openrouter_key = config.get("openrouter_api_key", "")
 
     return {
         "llm_provider": config["llm_provider"],
         "anthropic_model": config["anthropic_model"],
         "has_api_key": bool(api_key),
         "api_key_preview": f"...{api_key[-4:]}" if len(api_key) > 4 else "",
+        "has_openrouter_key": bool(openrouter_key),
+        "openrouter_key_preview": f"...{openrouter_key[-4:]}" if len(openrouter_key) > 4 else "",
+        "openrouter_model": config.get("openrouter_model", "anthropic/claude-sonnet-4.6"),
         "local_base_url": config["local_base_url"],
         "local_model": config["local_model"],
         "local_context_window": config.get("local_context_window", 128000),
+        "thinking_enabled": config.get("thinking_enabled", True),
     }

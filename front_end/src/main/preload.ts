@@ -12,11 +12,11 @@ contextBridge.exposeInMainWorld('api', {
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
 
-  // DevTools functions
-  openDevTools: () => ipcRenderer.send('open-devtools'),
-
   // Folder selection for imports
   selectFolder: () => ipcRenderer.invoke('select-folder'),
+
+  // Open a URL in the system's default browser (main process enforces https:// only)
+  openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
 });
 
 window.addEventListener('DOMContentLoaded', () => {

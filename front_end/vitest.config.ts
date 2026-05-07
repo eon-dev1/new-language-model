@@ -1,12 +1,10 @@
 import { defineConfig } from 'vitest/config';
 
-/**
- * Vitest configuration for testing Electron main process functionality.
- * 
- * This configuration is optimized for testing Node.js-based main process code
- * including file system operations and credential loading.
- */
 export default defineConfig({
+  // Replace import.meta.env vars at transform time so api.ts loads in tests.
+  define: {
+    'import.meta.env.VITE_API_BASE_URL': JSON.stringify('http://localhost:8221'),
+  },
   test: {
     // Use Node.js environment for main process testing
     environment: 'node',
@@ -15,7 +13,7 @@ export default defineConfig({
     globals: true,
     
     // Test file patterns
-    include: ['tests/**/*.test.ts', 'src/**/*.test.ts'],
+    include: ['tests/**/*.test.{ts,js}', 'src/**/*.test.ts'],
     
     // Longer timeout for file operations and IPC testing
     testTimeout: 10000,

@@ -4,6 +4,66 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [1.1.0] - 2026-05-07
+
+### Added
+
+- **OpenRouter LLM provider** — a third provider option alongside Anthropic and local, selectable from Chat Settings with its own API key field and model picker
+- **Centralized model registry** (`back_end/shared/model_registry.py`) — single source of truth for context windows, thinking support, display labels, and wire format per model
+- **Prompt caching for Anthropic and OpenRouter** — `cache_control: ephemeral` injected on system prompt and last tool definition, with cache hit/miss telemetry surfaced through the SSE stream
+- **Global server-enforced `thinking_enabled` flag** — authoritative toggle in Chat Settings that cannot be bypassed from the frontend or API
+- **System-prompt skill composition** — new `load_skill()` and `compose_prompt()` overlay skill definitions onto the base system prompt deterministically
+- **`TrustedHostMiddleware`** — restricts allowed hosts to `127.0.0.1`/`localhost` and disables `/docs`, `/redoc`, `/openapi.json` for the desktop-bundled API
+- **Memory tools wired into translation** — `search_language_notes` and `search_correction_log` now available during the translation tool loop
+- **OpenRouter integration documentation** (`back_end/docs/openrouter_docs.md`)
+- **Broad new backend test coverage** — model registry, system prompt composition, thinking flag enforcement, OpenAI-compat provider, and prompt caching
+
+### Added (Windows compatibility)
+
+- **Windows MongoDB binaries** — `download-mongo-binaries.js` now downloads pinned `mongodb-windows-x86_64-8.0.19.zip` and `mongodb-database-tools-windows-x86_64-100.14.0.zip` with their own SHA256 hashes
+- **PowerShell `Expand-Archive` extraction path** with tmp directory cleanup in a `finally` block
+- **`scripts/wait-file.js`** — replaces `wait-on`, working around Windows `ReadDirectoryChangesW` events that fire with `name === null`
+- **`shell.openExternal` IPC bridge** with an https-only allowlist enforced in the main process
+- **"AI Thinking" master toggle in Chat Settings** — global switch that hides the thinking-mode bar and forces thinking off at send time
+- **"Support" menu item in TopBar** — opens the project support page via the new external-link IPC
+
+### Changed
+
+- **MongoDB credentials simplified to a single `~/.nlm/mongodb_credentials.env`** — *breaking for existing installs*; replaces the previous two-tier pointer-file model
+- **Translation route refactored** — system prompt is now static (single-verse base or precomposed batch), with all dynamic context moved into the user message; HMAC signing of the batch system prompt is precomputed at import
+- **Cross-platform `mongod` binary resolution** — picks `mongod.exe` on win32 and `mongod` elsewhere; `GLIBC_TUNABLES=glibc.pthread.rseq=0` now gated to Linux only
+- **API base URL hardcoded to `http://127.0.0.1:8221/api`** — removes the `.env` / `VITE_API_BASE_URL` setup step
+- **Python target lowered from 3.12+ to 3.10+** — broader contributor compatibility
+- **pytest upgraded** from `8.x` to `9.x` (and `pytest-asyncio` from `0.23.x` to `1.x`)
+- **Electron** bumped from `^39.2.4` to `^39.8.9`; **Vite** from `^7.0.4` to `^7.3.2`
+- **Frontend version** bumped from `0.2.0` to `1.1.0`
+- **SHA256 pinning enforced** — startup assertion that every binary entry has a 64-char hex hash before downloading
+- **README rewritten** with Windows PowerShell setup instructions alongside Linux bash; explicitly states "Tested on Ubuntu 22.04 and Windows. macOS not yet supported"
+
+### Removed
+
+- **`back_end/db_connector/mongo_credentials_path.env.example`** — obsolete with the single-file credentials model
+- **`back_end/pytest.ini`** — consolidated into the repo-root `pytest.ini`; pytest must now be invoked from the repo root
+- **Obsolete credentials-path test class** in `test_imports_and_structure.py` — replaced by the new home-directory-based test suite
+- **`wait-on` dependency** — replaced by in-tree `scripts/wait-file.js`
+- **`scripts/download-mongod.js`** — superseded Linux-only downloader, now removed
+- **DevTools IPC and "Show Console Log" menu item** — replaced by Electron's built-in `toggleDevTools` role
+- **`repository` field from `front_end/package.json`**
+
+### Fixed (Windows compatibility)
+
+- **Explicit `encoding='utf-8'` on file I/O** across chat config, MCP tool result writes, and tests — prevents silent corruption from Windows' default `cp1252` codec on non-Latin Bible text
+- **`mongodump` binary selection on Windows** (`mongodump.exe`) and skipped POSIX `os.chmod(0o400)` on win32
+- **HTTPX test client base URL** changed to `http://localhost` so route tests pass through the new `TrustedHostMiddleware`
+
+### Security
+
+- **TrustedHost binding + disabled API docs** — closes host-header spoofing and unintended API surface enumeration on the desktop port
+- **External link opener restricted to https://** — blocks `file://`, `javascript:`, etc. from the renderer
+- **Windows MongoDB downloads SHA256-pinned** — supply-chain integrity for the new download path
+
+---
+
 ## [0.2.0] - 2026-03-27
 
 ### Infrastructure

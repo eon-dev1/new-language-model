@@ -7,13 +7,23 @@
 set -e
 
 # Base paths
-NLM_ROOT="/filepath/NLM"
-LLAMA_CPP="${NLM_ROOT}/llama.cpp"
-LOCAL_LLM="${NLM_ROOT}/local_llm"
+LOCAL_LLM="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load machine-specific paths (gitignored); env vars override if already set
+[[ -f "${LOCAL_LLM}/local_llm_config.env" ]] && source "${LOCAL_LLM}/local_llm_config.env"
+
+if [[ -z "${NLM_LLAMA_CPP}" || -z "${NLM_MODEL_PATH}" ]]; then
+    echo "Error: NLM_LLAMA_CPP and NLM_MODEL_PATH must be set."
+    echo "Copy local_llm/local_llm_config.env.example to local_llm/local_llm_config.env and fill in your paths."
+    exit 1
+fi
+
+LLAMA_CPP="${NLM_LLAMA_CPP}"
+export LD_LIBRARY_PATH="${LLAMA_CPP}/build/bin:${LD_LIBRARY_PATH}"
 
 # Model configuration
-MODEL_PATH="filepath.gguf"
-CHAT_TEMPLATE="${LLAMA_CPP}/models/templates/tool-calling-model.jinja"
+MODEL_PATH="${NLM_MODEL_PATH}"
+CHAT_TEMPLATE="${LLAMA_CPP}/models/templates/ibm-granite-4-tiny.jinja"
 
 # Server configuration
 HOST="127.0.0.1"
@@ -32,7 +42,6 @@ LOG_FILE="${LOG_DIR}/granite-server.log"
 mkdir -p "${LOG_DIR}"
 
 # Check if server binary exists
-# Check your GPU architecture, not all will use blackwell SM 120 
 SERVER_BIN="${LLAMA_CPP}/build/bin/llama-server"
 if [[ ! -x "${SERVER_BIN}" ]]; then
     echo "Error: llama-server binary not found at ${SERVER_BIN}"

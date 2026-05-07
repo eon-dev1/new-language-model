@@ -12,17 +12,18 @@ The only difference is base_url and api_key.
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Literal
 
 import anthropic
 
+from shared import model_registry
 from shared.chat_config import load_config
+from shared.model_registry import get_api_format
 
 logger = logging.getLogger(__name__)
 
 THINKING_BUDGET_TOKENS = 8000
 THINKING_MAX_TOKENS = 16192  # budget + generous output headroom
-HAIKU_MODELS = {"claude-haiku-4-5-20251001"}
 THINKING_BETA_HEADER = "interleaved-thinking-2025-05-14"
 
 
@@ -58,13 +59,35 @@ class AnthropicProvider(LLMProvider):
     implement the Anthropic /v1/messages endpoint (e.g., llama.cpp).
     """
 
-    def __init__(self, api_key: str, model: str, base_url: str | None = None):
+    def __init__(self, api_key: str, model: str, base_url: str | None = None,
+                 provider_type: Literal["anthropic", "local", "openrouter"] = "anthropic"):
         kwargs: dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
         self.client = anthropic.AsyncAnthropic(**kwargs)
         self.model = model
-        self.is_local = base_url is not None  # Local LLMs never support thinking
+        self.provider_type = provider_type
+
+    def _apply_prompt_caching(self, kwargs: dict[str, Any]) -> None:
+        """Add cache_control breakpoints to system prompt and last tool definition.
+
+        Converts system string → content block list (required by Anthropic caching API).
+        Shallow-copies the last tool dict before mutating to avoid polluting shared registries.
+        """
+        if "system" in kwargs and isinstance(kwargs["system"], str):
+            kwargs["system"] = [
+                {
+                    "type": "text",
+                    "text": kwargs["system"],
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        if "tools" in kwargs and kwargs["tools"]:
+            tools = list(kwargs["tools"])
+            last_tool = dict(tools[-1])
+            last_tool["cache_control"] = {"type": "ephemeral"}
+            tools[-1] = last_tool
+            kwargs["tools"] = tools
 
     async def stream_chat(
         self,
@@ -83,12 +106,26 @@ class AnthropicProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
 
-        # Inject thinking — guard on local provider AND Haiku model
-        use_beta = thinking_enabled and not self.is_local and self.model not in HAIKU_MODELS
+        # Inject thinking — guard on global config flag, provider_type, and per-model registry check.
+        # load_config() here is the authoritative enforcement point: impossible to bypass via any
+        # frontend or API path. Intentional sync I/O — small JSON file, runs once per stream call.
+        global_thinking_enabled = load_config().get("thinking_enabled", True)
+        use_beta = (
+            thinking_enabled
+            and global_thinking_enabled
+            and model_registry.supports_thinking(self.model)
+            and self.provider_type != "local"
+        )
         if use_beta:
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": THINKING_BUDGET_TOKENS}
             kwargs["betas"] = [THINKING_BETA_HEADER]
             kwargs["max_tokens"] = max(max_tokens, THINKING_MAX_TOKENS)
+
+        if self.provider_type != "local" and not self.model.startswith("qwen/"):
+            self._apply_prompt_caching(kwargs)
+
+        if self.provider_type == "openrouter":
+            logger.info(f"[openrouter] stream_chat model={self.model} tools={len(kwargs.get('tools', []))} thinking={use_beta}")
 
         try:
             # Beta endpoint required when betas header is present (e.g. interleaved-thinking)
@@ -135,22 +172,40 @@ class AnthropicProvider(LLMProvider):
                     and final.usage
                     and getattr(final.usage, "input_tokens", 0)
                 ):
+                    cache_creation = getattr(final.usage, "cache_creation_input_tokens", None) or 0
+                    cache_read = getattr(final.usage, "cache_read_input_tokens", None) or 0
+                    logger.info(f"[cache] usage: input={final.usage.input_tokens} creation={cache_creation} read={cache_read}")
+                    if cache_read > 0:
+                        logger.info(f"[cache] HIT: {cache_read} tokens read from cache")
+                    elif cache_creation > 0:
+                        logger.info(f"[cache] MISS: {cache_creation} tokens written to cache")
                     yield {
                         "type": "usage",
                         "input_tokens": final.usage.input_tokens,
                         "output_tokens": final.usage.output_tokens,
+                        "cache_creation_input_tokens": cache_creation,
+                        "cache_read_input_tokens": cache_read,
                     }
 
             yield {"type": "done"}
 
         except anthropic.APIConnectionError as e:
-            logger.error(f"Cannot connect to LLM: {e}")
+            if self.provider_type == "openrouter":
+                logger.error(f"[openrouter] Cannot connect: {e}")
+            else:
+                logger.error(f"Cannot connect to LLM: {e}")
             yield {"type": "error", "content": f"Cannot connect to LLM server. Is it running? ({e})"}
         except anthropic.APIError as e:
-            logger.error(f"LLM API error: {e}")
+            if self.provider_type == "openrouter":
+                logger.error(f"[openrouter] API error model={self.model}: {e}")
+            else:
+                logger.error(f"LLM API error: {e}")
             yield {"type": "error", "content": f"LLM API error: {e.message}"}
         except Exception as e:
-            logger.error(f"Unexpected error in LLM provider: {e}")
+            if self.provider_type == "openrouter":
+                logger.error(f"[openrouter] Unexpected error model={self.model}: {e}")
+            else:
+                logger.error(f"Unexpected error in LLM provider: {e}")
             yield {"type": "error", "content": str(e)}
 
 
@@ -172,13 +227,29 @@ def get_provider() -> LLMProvider:
         if not api_key:
             raise ValueError("Anthropic API key not configured. Set it in Chat Settings.")
         model = config.get("anthropic_model", "claude-sonnet-4-6")
-        return AnthropicProvider(api_key=api_key, model=model)
+        return AnthropicProvider(api_key=api_key, model=model, provider_type="anthropic")
+
+    elif provider_type == "openrouter":
+        api_key = config.get("openrouter_api_key", "")
+        if not api_key:
+            raise ValueError("OpenRouter API key not configured. Set it in Chat Settings.")
+        model = config.get("openrouter_model", "anthropic/claude-sonnet-4.6")
+
+        if get_api_format(model) == "openai":
+            from utils.openai_provider import OpenAIProvider
+            return OpenAIProvider(api_key=api_key, model=model)
+        else:
+            return AnthropicProvider(
+                api_key=api_key, model=model,
+                base_url="https://openrouter.ai/api",
+                provider_type="openrouter",
+            )
 
     elif provider_type == "local":
         base_url = config.get("local_base_url", "http://127.0.0.1:8080")
         model = config.get("local_model", "default")
         # Local servers don't need a real API key but the SDK requires one
-        return AnthropicProvider(api_key="local", model=model, base_url=base_url)
+        return AnthropicProvider(api_key="local", model=model, base_url=base_url, provider_type="local")
 
     else:
         raise ValueError(f"Unknown LLM provider: {provider_type}")

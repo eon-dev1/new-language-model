@@ -9,18 +9,8 @@ interface Window {
     maximize: () => void;
     close: () => void;
 
-    // DevTools
-    openDevTools: () => void;
-
     // Folder selection for imports
     selectFolder: () => Promise<string | null>;
   };
 }
 
-interface ImportMetaEnv {
-  readonly VITE_API_BASE_URL: string;
-}
-
-interface ImportMeta {
-  readonly env: ImportMetaEnv;
-}

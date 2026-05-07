@@ -81,6 +81,7 @@ export const ChatDrawer: React.FC = () => {
     drawerWidth, isMaximized, setDrawerWidth, toggleMaximize,
     chatMode, setChatMode,
     currentModel, currentProvider, refreshCurrentModel,
+    thinkingEnabled,
     toolResultBuffer,
   } = useChat();
   const { settings } = useSettings();
@@ -422,6 +423,7 @@ export const ChatDrawer: React.FC = () => {
           <Divider />
 
           {/* Modes bar */}
+          {thinkingEnabled && (
           <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 0.5, gap: 0.25, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
             <Typography variant="caption" sx={{ opacity: 0.4, mr: 1, fontSize: '0.65rem', letterSpacing: '0.08em', textTransform: 'uppercase', userSelect: 'none' }}>
               Modes
@@ -431,6 +433,7 @@ export const ChatDrawer: React.FC = () => {
             <ModeButton label="Maximum Thinking" active={false}                        onClick={() => {}} disabled />
             <ModeButton label="Deep Research"    active={false}                        onClick={() => {}} disabled />
           </Box>
+          )}
 
           {/* Placeholder for no language */}
           <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}>
@@ -497,6 +500,7 @@ export const ChatDrawer: React.FC = () => {
         <Divider />
 
         {/* Modes bar */}
+        {thinkingEnabled && (
         <Box sx={{ display: 'flex', alignItems: 'center', px: 1.5, py: 0.5, gap: 0.25, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
           <Typography variant="caption" sx={{ opacity: 0.4, mr: 1, fontSize: '0.65rem', letterSpacing: '0.08em', textTransform: 'uppercase', userSelect: 'none' }}>
             Modes
@@ -506,6 +510,7 @@ export const ChatDrawer: React.FC = () => {
           <ModeButton label="Maximum Thinking" active={false}                        onClick={() => {}} disabled />
           <ModeButton label="Deep Research"    active={false}                        onClick={() => {}} disabled />
         </Box>
+        )}
 
       {/* Messages */}
       <Box sx={{ flex: 1, overflowY: 'auto', p: 1.5, minHeight: 0 }}>

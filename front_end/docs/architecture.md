@@ -22,7 +22,7 @@ The application follows Electron's dual-process architecture:
 │                     IPC Handlers                                 │
 │  ┌────────────────────────────────────────────────────────────┐ │
 │  │ window-minimize | window-maximize | window-close          │ │
-│  │ open-devtools   | select-folder                           │ │
+│  │ open-external   | select-folder                           │ │
 │  └────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
@@ -102,11 +102,11 @@ contextBridge.exposeInMainWorld('api', {
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
 
-  // DevTools functions
-  openDevTools: () => ipcRenderer.send('open-devtools'),
-
   // Folder selection for imports (invoke = async with return value)
   selectFolder: () => ipcRenderer.invoke('select-folder'),
+
+  // Open external URLs in the system browser (main process enforces https:// only)
+  openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
 });
 ```
 
@@ -169,13 +169,9 @@ interface SettingsContextType {
   updateSettings: (partial: Partial<AppSettings>) => void;
   resetSettings: () => void;
 }
-
-interface AppSettings {
-  fontFamily: 'system-ui' | 'Times New Roman';
-  fontSize: number;  // 12-24
-  toolPreviewEnabled: boolean;
-}
 ```
+
+`AppSettings` is defined in `createDynamicTheme.ts` and re-exported from `SettingsContext.tsx`. See the [createDynamicTheme](#createdynamictheme) section below.
 
 **Hook Usage**:
 ```typescript
@@ -205,7 +201,6 @@ Used for window controls:
 window.api.minimize();
 window.api.maximize();
 window.api.close();
-window.api.openDevTools();
 ```
 
 ```typescript
@@ -264,30 +259,7 @@ The preload script only exposes specific, validated functions:
 | Main | Webpack | webpack.config.js | dist/main/ |
 | Renderer | Vite | vite.config.js | dist/renderer/ |
 
-### TypeScript Configuration
-
-Separate TypeScript configs for each process:
-
-```
-tsconfig.json              # Root project references
-  ├── tsconfig.main.json   # Main process (Node.js types)
-  └── tsconfig.renderer.json # Renderer (DOM types, React)
-```
-
-### Development Flow
-
-```
-npm run dev
-    │
-    ├─→ npm run dev:main     (Webpack --watch)
-    │       └─→ Rebuilds src/main/ on changes
-    │
-    ├─→ npm run dev:renderer (Vite dev server)
-    │       └─→ Hot module replacement for React
-    │
-    └─→ electron dist/main/main.js
-            └─→ Starts after main process builds
-```
+See [Development](./development.md) for TypeScript configuration details, build commands, and the full dev-mode flow.
 
 ## UI/UX Architecture
 

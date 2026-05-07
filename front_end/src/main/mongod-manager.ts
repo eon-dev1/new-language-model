@@ -14,7 +14,8 @@ const MAX_RETRIES    = 30;
 const RETRY_INTERVAL = 1000;  // ms
 
 // Dev path only. __dirname = dist/main/ at runtime (webpack: node.__dirname: false).
-const binPath = path.join(os.homedir(), '.nlm', 'bin', 'mongod');
+const binaryName = process.platform === 'win32' ? 'mongod.exe' : 'mongod';
+const binPath = path.join(os.homedir(), '.nlm', 'bin', binaryName);
 
 // Module-level state — reset between tests via vi.resetModules() + dynamic import.
 let mongodProcess: ChildProcess | null = null;
@@ -129,7 +130,9 @@ async function _doStart(): Promise<boolean> {
       detached: false,
       // Disable glibc rseq to avoid tcmalloc-google incompatibility warning.
       // Without this, MongoDB logs: "glibc rseq support active — critical performance implications".
-      env: { ...process.env, GLIBC_TUNABLES: 'glibc.pthread.rseq=0' },
+      env: process.platform === 'linux'
+        ? { ...process.env, GLIBC_TUNABLES: 'glibc.pthread.rseq=0' }
+        : { ...process.env },
     });
 
     proc.on('error', (err: NodeJS.ErrnoException) => {

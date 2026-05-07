@@ -7,6 +7,7 @@ restorable with mongorestore --gzip.
 """
 
 import os
+import sys
 import stat
 import tempfile
 import asyncio
@@ -61,7 +62,8 @@ async def backup_database(
             raise HTTPException(status_code=400, detail="output_dir is not writable")
 
         # 2. Resolve mongodump binary path
-        mongodump_path = os.path.expanduser("~/.nlm/bin/mongodump")
+        ext = '.exe' if sys.platform == 'win32' else ''
+        mongodump_path = os.path.expanduser(f'~/.nlm/bin/mongodump{ext}')
         if not os.path.isfile(mongodump_path):
             raise HTTPException(
                 status_code=500,
@@ -80,7 +82,8 @@ async def backup_database(
         )
         cfg_fd.write(uri_cfg)
         cfg_fd.close()
-        os.chmod(cfg_fd.name, stat.S_IRUSR)  # owner-read only (0o400)
+        if sys.platform != 'win32':
+            os.chmod(cfg_fd.name, stat.S_IRUSR)  # owner-read only (0o400)
 
         try:
             # 5. Build mongodump command

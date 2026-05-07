@@ -220,7 +220,7 @@ def save_result_to_file(
 
     # Write file
     try:
-        filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
     except OSError as e:
         raise ToolError(
             "write_error",

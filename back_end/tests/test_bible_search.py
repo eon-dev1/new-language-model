@@ -80,7 +80,7 @@ def make_find_side_effect(english_docs, target_docs):
 
 # No DB override needed: FastAPI's Query(min_length=2) validation fires before
 # the handler is called, so the DB is never touched for a rejected query.
-client = TestClient(app)
+client = TestClient(app, base_url="http://localhost")
 
 
 # ─── Tests 1-3, 5-7: handler-direct ──────────────────────────────────────────

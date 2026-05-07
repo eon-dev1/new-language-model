@@ -37,13 +37,13 @@ class TestLoadConfig:
         assert tmp_config.exists()
 
     def test_corrupt_json_returns_defaults(self, tmp_config):
-        tmp_config.write_text("{not valid json!!!")
+        tmp_config.write_text("{not valid json!!!", encoding='utf-8')
         config = load_config()
         assert config == DEFAULT_CONFIG
 
     def test_merges_new_keys_with_existing(self, tmp_config):
         """If config file is missing a key added in a newer version, it gets the default."""
-        tmp_config.write_text(json.dumps({"llm_provider": "local"}))
+        tmp_config.write_text(json.dumps({"llm_provider": "local"}), encoding='utf-8')
         config = load_config()
         assert config["llm_provider"] == "local"
         assert config["anthropic_model"] == DEFAULT_CONFIG["anthropic_model"]

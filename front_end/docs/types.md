@@ -352,11 +352,11 @@ interface WindowApi {
   maximize: () => void;
   close: () => void;
 
-  // DevTools
-  openDevTools: () => void;
-
   // File system operations
   selectFolder: () => Promise<string | null>;  // Native folder dialog
+
+  // Opens a URL in the system browser (main process enforces https:// only)
+  openExternal: (url: string) => Promise<void>;
 }
 
 declare global {

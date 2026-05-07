@@ -24,13 +24,79 @@ from db_connector.connection import MongoDBConnector
 # =============================================================================
 
 class TestSettingsLoading:
-    """Test the two-tier credential loading system."""
+    """Test credential loading from ~/.nlm/mongodb_credentials.env."""
 
-    def test_credentials_path_file_exists(self, credentials_path_file):
-        """Tier 1 credentials pointer file should exist."""
-        assert credentials_path_file.exists(), (
-            f"mongo_credentials_path.env not found at: {credentials_path_file}"
+    def test_credentials_file_at_home_nlm(self, tmp_path, monkeypatch):
+        """Hardcoded path must be Path.home() / '.nlm' / 'mongodb_credentials.env'."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.delenv("DATABASE_NAME", raising=False)
+        nlm_dir = tmp_path / ".nlm"
+        nlm_dir.mkdir()
+        (nlm_dir / "mongodb_credentials.env").write_text(
+            'MONGODB_CONNECTION_STRING="mongodb://localhost:27017"',
+            encoding='utf-8',
         )
+        settings = MongoDBSettings.create_from_credentials()
+        assert settings is not None
+
+    def test_missing_file_raises_with_actionable_message(self, tmp_path, monkeypatch):
+        """FileNotFoundError message names the exact expected path."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        with pytest.raises(FileNotFoundError) as exc_info:
+            MongoDBSettings.create_from_credentials()
+        expected_path = str(tmp_path / ".nlm" / "mongodb_credentials.env")
+        assert expected_path in str(exc_info.value)
+
+    def test_missing_connection_string_raises_value_error(self, tmp_path, monkeypatch):
+        """File exists but MONGODB_CONNECTION_STRING absent → ValueError."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        nlm_dir = tmp_path / ".nlm"
+        nlm_dir.mkdir()
+        (nlm_dir / "mongodb_credentials.env").write_text("DATABASE_NAME=foo\n", encoding='utf-8')
+        with pytest.raises(ValueError):
+            MongoDBSettings.create_from_credentials()
+
+    def test_database_name_omitted_uses_class_default(self, tmp_path, monkeypatch):
+        """File without DATABASE_NAME → database_name == 'nlm_translator'."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.delenv("DATABASE_NAME", raising=False)
+        nlm_dir = tmp_path / ".nlm"
+        nlm_dir.mkdir()
+        (nlm_dir / "mongodb_credentials.env").write_text(
+            'MONGODB_CONNECTION_STRING="mongodb://localhost:27017"\n',
+            encoding='utf-8',
+        )
+        settings = MongoDBSettings.create_from_credentials()
+        assert settings.database_name == "nlm_translator"
+
+    def test_database_name_in_file_overrides_default(self, tmp_path, monkeypatch):
+        """File with DATABASE_NAME=foo → explicit kwarg wins over class default."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        nlm_dir = tmp_path / ".nlm"
+        nlm_dir.mkdir()
+        (nlm_dir / "mongodb_credentials.env").write_text(
+            'MONGODB_CONNECTION_STRING="mongodb://localhost:27017"\nDATABASE_NAME=foo\n',
+            encoding='utf-8',
+        )
+        settings = MongoDBSettings.create_from_credentials()
+        assert settings.database_name == "foo"
+
+    def test_parser_tolerates_blank_lines_and_comments(self, tmp_path, monkeypatch):
+        """# comment lines and blank lines are skipped; key is still parsed."""
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.delenv("DATABASE_NAME", raising=False)
+        nlm_dir = tmp_path / ".nlm"
+        nlm_dir.mkdir()
+        content = (
+            "# This is a comment\n"
+            "\n"
+            'MONGODB_CONNECTION_STRING="mongodb://localhost:27017"\n'
+            "\n"
+            "# Another comment\n"
+        )
+        (nlm_dir / "mongodb_credentials.env").write_text(content, encoding='utf-8')
+        settings = MongoDBSettings.create_from_credentials()
+        assert settings.mongodb_connection_string == "mongodb://localhost:27017"
 
     def test_settings_creation_succeeds(self, mongodb_settings):
         """Settings should be created from credentials without error."""

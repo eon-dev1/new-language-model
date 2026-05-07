@@ -36,15 +36,15 @@ The API layer (`src/renderer/api.ts`) handles communication between the Electron
 
 ## Configuration
 
-### Environment Variables
+### Base URL
 
-Create a `.env` file in the `front_end/` directory:
+The API base URL is hardcoded in `src/renderer/api.ts`:
 
-```env
-VITE_API_BASE_URL=http://localhost:8221/api
+```typescript
+const API_BASE_URL = 'http://127.0.0.1:8221/api';
 ```
 
-This URL is accessed via `import.meta.env.VITE_API_BASE_URL` in the renderer process.
+No `.env` file or environment variable is required. To change the URL, edit the constant directly.
 
 **Note**: No credential files are required. API authentication has been disabled for local development.
 
@@ -138,23 +138,7 @@ try {
 
 ## IPC Functions
 
-### selectFolder()
-
-Opens native OS folder selection dialog via Electron IPC.
-
-```typescript
-export const selectFolder = (): Promise<string | null>
-```
-
-**Returns**: Selected folder path, or `null` if cancelled
-
-**Usage**:
-```typescript
-const folderPath = await selectFolder();
-if (folderPath) {
-  console.log('Selected:', folderPath);
-}
-```
+`selectFolder()` wraps `window.api.selectFolder()` for use in the renderer. See [Types — selectFolder](./types.md#selectfolder) for the full contract and IPC channel details.
 
 ---
 
@@ -444,7 +428,7 @@ Complete flow for `fetchLanguages()`:
      │
      ├─→ Add Content-Type header
      │
-     └─→ fetch('http://localhost:8221/api/languages', { headers })
+     └─→ fetch('http://127.0.0.1:8221/api/languages', { headers })
      │
 3. Response handling
      │
@@ -460,7 +444,7 @@ Complete flow for `fetchLanguages()`:
 ### Base URL
 
 ```
-http://localhost:8221/api
+http://127.0.0.1:8221/api
 ```
 
 ### Endpoints Used
@@ -558,7 +542,6 @@ console.log('Backend connected:', isConnected);
 
 | Issue | Check |
 |-------|-------|
-| "VITE_API_BASE_URL is not defined" | Create `.env` file with correct URL |
 | Network errors | Ensure backend is running on port 8221 |
 | Connection refused | Verify backend started: `python main.py` |
 | Invalid JSON response | Check backend logs for errors |

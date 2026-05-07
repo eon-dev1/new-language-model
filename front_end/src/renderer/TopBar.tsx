@@ -1,7 +1,9 @@
 // TopBar.tsx
 
 import React from 'react';
-import { AppBar, Toolbar, IconButton, Menu, MenuItem, Box, Divider } from '@mui/material';
+import { AppBar, Toolbar, IconButton, Menu, MenuItem, Box, Divider, Tooltip } from '@mui/material';
+
+const SUPPORT_URL = 'https://www.givesendgo.com/newlanguagemodel';
 import MenuIcon       from '@mui/icons-material/Menu';
 import MinimizeIcon   from '@mui/icons-material/Minimize';
 import CropSquareIcon from '@mui/icons-material/CropSquare';
@@ -22,7 +24,6 @@ export const TopBar: React.FC = () => {
   }, []);
 
   const [anchor, setAnchor] = React.useState<null | HTMLElement>(null);
-  const [viewSubmenu, setViewSubmenu] = React.useState<null | HTMLElement>(null);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const { toggleChat, isOpen: chatOpen } = useChat();
 
@@ -52,26 +53,21 @@ export const TopBar: React.FC = () => {
         <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)}>
           <MenuItem onClick={() => setAnchor(null)}>File</MenuItem>
           <MenuItem onClick={() => setAnchor(null)}>Edit</MenuItem>
-          <MenuItem onClick={(e) => {
-            console.log('[TopBar] View menu clicked');
-            setViewSubmenu(e.currentTarget);
-            setAnchor(null);
-          }}>View</MenuItem>
           <MenuItem onClick={() => setAnchor(null)}>Help</MenuItem>
-        </Menu>
-
-        <Menu anchorEl={viewSubmenu} open={!!viewSubmenu} onClose={() => setViewSubmenu(null)}>
           <MenuItem onClick={() => {
-            console.log('[TopBar] Show Console Log clicked');
-            window.api.openDevTools();
-            setViewSubmenu(null);
-          }}>Show Console Log</MenuItem>
-          <Divider />
-          <MenuItem onClick={() => {
-            console.log('[TopBar] Settings clicked');
             setSettingsOpen(true);
-            setViewSubmenu(null);
+            setAnchor(null);
           }}>Settings</MenuItem>
+          <Tooltip
+            title={SUPPORT_URL}
+            placement="right"
+            componentsProps={{ tooltip: { sx: { whiteSpace: 'nowrap', maxWidth: 'none' } } }}
+          >
+            <MenuItem onClick={() => {
+              window.api.openExternal(SUPPORT_URL).catch(() => {});
+              setAnchor(null);
+            }}>Support ❤️</MenuItem>
+          </Tooltip>
         </Menu>
         <Box sx={{ flexGrow: 1 }} />
         {/* Chat toggle */}
