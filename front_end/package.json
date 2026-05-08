@@ -1,13 +1,9 @@
 {
   "name": "new-language-model",
-  "version": "0.2.0",
+  "version": "1.2.0",
   "description": "New Language Model",
   "main": "dist/main/main.js",
   "author": "Eon Dev",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/eon-dev1/new-language-model"
-  },
   "license": "MIT",
   "scripts": {
     "dev:renderer": "vite",
@@ -18,7 +14,7 @@
     "start": "electron dist/main/main.js",
     "prepare:mongo": "node scripts/download-mongo-binaries.js",
     "predev": "node scripts/download-mongo-binaries.js",
-    "dev": "concurrently --names \"main,renderer,electron\" \"npm run dev:main\" \"npm run dev:renderer\" \"wait-on dist/main/main.js && electron dist/main/main.js\"",
+    "dev": "concurrently --names \"main,renderer,electron\" \"npm run dev:main\" \"npm run dev:renderer\" \"node scripts/wait-file.js dist/main/main.js && electron dist/main/main.js\"",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write .",
     "test": "vitest run && vitest run --config vitest.renderer.config.ts",
@@ -32,7 +28,7 @@
     "@fontsource/orbitron": "^5.2.6",
     "@mui/icons-material": "^5.18.0",
     "@mui/material": "^5.18.0",
-    "electron": "^39.2.4",
+    "electron": "^39.8.9",
     "framer-motion": "^10.18.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
@@ -49,9 +45,8 @@
     "prettier": "^3.2.5",
     "ts-loader": "^9.5.0",
     "typescript": "^5.4.0",
-    "vite": "^7.0.4",
+    "vite": "^7.3.2",
     "vitest": "^3.2.4",
-    "wait-on": "^7.0.0",
     "webpack": "^5.91.0",
     "webpack-cli": "^5.1.4"
   }

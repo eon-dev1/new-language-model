@@ -5,6 +5,7 @@ import logging
 import uuid
 from contextvars import ContextVar
 from fastapi import FastAPI, Request
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 FAST_API_PORT = int(os.getenv('FAST_API_PORT', 8221))
 
@@ -32,7 +33,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="NLM FastAPI Endpoint",
     description="API for New Language Model Bible translation operations",
-    version="0.0.1"
+    version="0.0.1",
+    docs_url=None, redoc_url=None, openapi_url=None,
 )
 
 # Import routers
@@ -66,6 +68,11 @@ async def request_id_middleware(request: Request, call_next):
     finally:
         request_id_var.reset(token)
     return response
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["127.0.0.1", "localhost"],
+)
 
 # Register routes
 app.include_router(check_connection_router, prefix="/api")

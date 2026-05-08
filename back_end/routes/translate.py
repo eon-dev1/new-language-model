@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from db_connector.connection import get_mongodb_connector
 from shared.llm_tool_loop import run_tool_loop, get_context_window
+from shared.system_prompt import SYSTEM_PROMPT, load_skill, compose_prompt
 from shared.tool_registry import get_tools
 from utils.llm_provider import get_provider
 
@@ -39,7 +40,9 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Per-process HMAC key for signing batch system prompts.
-# Prevents a client from swapping the system prompt between batch resume calls.
+# Now vestigial — signs a static server-known constant (_BATCH_SYSTEM)
+# rather than a per-batch unique string. Kept for backward compatibility
+# with the client echo/verify flow.
 _BATCH_HMAC_KEY = os.urandom(32)
 
 
@@ -51,6 +54,20 @@ def _verify_prompt(prompt: str, signature: str) -> bool:
     expected = hmac.new(_BATCH_HMAC_KEY, prompt.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
 
+
+# ── Composed system prompts (pre-computed at import, not per request) ─────────
+
+_VERSE_SKILL = load_skill("verse-translation")
+if not _VERSE_SKILL:
+    logger.error(
+        "verse-translation/SKILL.md not found — "
+        "batch translation will run without approval loop guidance"
+    )
+
+_BATCH_SYSTEM = compose_prompt(SYSTEM_PROMPT, skill=_VERSE_SKILL)
+_BATCH_SYSTEM_SIG = _sign_prompt(_BATCH_SYSTEM)
+
+
 # Tool subset focused on translation context gathering
 TRANSLATION_TOOL_NAMES = {
     "get_language_info",
@@ -60,6 +77,8 @@ TRANSLATION_TOOL_NAMES = {
     "list_grammar_categories",
     "get_grammar_category",
     "get_word_index",
+    "search_language_notes",
+    "search_correction_log",
     "propose_verse_translation",   # Terminal write tool
 }
 
@@ -70,64 +89,43 @@ def get_translation_tools() -> list[dict]:
     return [t for t in all_tools if t["name"] in TRANSLATION_TOOL_NAMES]
 
 
-# NOTE: {english_text} is intentionally NOT a format slot in this template.
-# Stored english_text is clean (USFM importer strips all backslash markers and
-# Strong's numbers). But keeping english_text out of the template entirely is the
-# correct structural pattern — it never touches str.format(), so any edge case
-# (HTML import, future paths) is handled safely.
-# english_text appears only in the user message (plain f-string — no format risk).
-TRANSLATION_SYSTEM_PROMPT = """
-You are a specialized Bible translator for {language_name} ({language_code}).
+# ── User message builders (extracted for testability) ─────────────────────────
 
-Task: Translate ONE verse from English into {language_name}.
+def _build_single_verse_user_message(
+    book_name: str, chapter: int, verse: int,
+    language_name: str, language_code: str, english_text: str,
+) -> str:
+    return (
+        f"Please translate {book_name} {chapter}:{verse} "
+        f"into {language_name} (language code: {language_code}).\n\n"
+        f"English: \"{english_text}\""
+    )
 
-Verse: {book_name} {chapter}:{verse}
 
-## Strategy
-1. Call get_parallel_verses to compare this passage across available languages — find convergent and divergent translation patterns
-2. Look up key terms via get_dictionary_entry and get_word_index to identify established vocabulary in {language_name}
-3. Check get_grammar_category (morphology, syntax) if sentence structure is uncertain
-4. Continue gathering context UNTIL:
-   - You have HIGH CONFIDENCE in the translation, OR
-   - The system signals context budget is running low
-5. Call propose_verse_translation with your translation, confidence (0.0-1.0), and brief rationale
+def _build_batch_user_message(
+    book_name: str, chapter: int,
+    language_name: str, language_code: str,
+    verses: list,
+) -> str:
+    verse_list = "\n".join(
+        f"  Verse {v.verse_number}: \"{v.english_text}\""
+        for v in verses
+    )
+    return (
+        f"Please translate the following {len(verses)} verse(s) from "
+        f"{book_name} chapter {chapter} into {language_name} "
+        f"(language code: {language_code}), one at a time.\n\n"
+        f"Verses to translate:\n{verse_list}\n\n"
+        f"Start with the first untranslated verse."
+    )
 
-Prioritize faithfulness and natural expression in {language_name}.
-""".strip()
 
+# ── Pydantic models ──────────────────────────────────────────────────────────
 
 class TranslateVerseRequest(BaseModel):
     english_text: str
     language_name: str   # e.g. "Bughotu" — from BibleReader props
     book_name: str       # e.g. "John" — from selectedBook.book_name
-
-
-# NOTE: {verse_list} is safe as a format slot.
-# verse_list is pre-built via str.join (not embedded in the template directly).
-# str.format() processes the template once and does NOT re-parse substituted values,
-# so {these} inside english_text content is never seen as a format specifier.
-BATCH_TRANSLATION_SYSTEM_PROMPT = """
-You are a specialized Bible translator for {language_name} ({language_code}).
-
-Task: Translate {verse_count} verse(s) from {book_name} chapter {chapter} into {language_name}.
-
-Verses to translate (in order):
-{verse_list}
-
-## Strategy
-1. Call get_parallel_verses for this chapter range — gather context for ALL verses at once
-2. Look up key shared vocabulary via get_dictionary_entry and get_word_index
-3. Check get_grammar_category (morphology, syntax) if sentence structure is uncertain
-4. Once you have sufficient shared context, translate verse by verse:
-   - Call propose_verse_translation for the FIRST untranslated verse
-   - ALWAYS include verse_number in the call — it is required for frontend routing
-   - Wait for human review (you will see approval/rejection + optional feedback)
-   - Apply any translator corrections or insights to the remaining verses before proceeding
-5. Continue until all {verse_count} verse(s) are proposed
-
-Prioritize faithfulness and natural expression in {language_name}.
-Translator corrections on earlier verses should directly inform your choices for later verses.
-""".strip()
 
 
 class BatchVerseItem(BaseModel):
@@ -151,6 +149,8 @@ class BatchResumeRequest(BaseModel):
     feedback: Optional[str] = None  # Translator comment or corrected text (for "reject" path)
 
 
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
 @router.post("/verses/{language}/{book_code}/{chapter}/{verse}/translate-stream")
 async def translate_verse_stream(
     language: str,
@@ -166,21 +166,13 @@ async def translate_verse_stream(
             language_code = language.lower().replace(' ', '_').replace('-', '_')
             db = await get_mongodb_connector()
 
-            # Format system prompt — english_text is NOT a slot here (see module docstring)
-            system = TRANSLATION_SYSTEM_PROMPT.format(
-                language_name=request.language_name,
-                language_code=language_code,
-                book_name=request.book_name,
-                chapter=chapter,
-                verse=verse,
-            )
+            system = SYSTEM_PROMPT
 
-            # english_text goes in the user message as a plain f-string — safe for any input
             messages = [{
                 "role": "user",
-                "content": (
-                    f"Please translate {request.book_name} {chapter}:{verse} "
-                    f"into {request.language_name}.\n\nEnglish: \"{request.english_text}\""
+                "content": _build_single_verse_user_message(
+                    request.book_name, chapter, verse,
+                    request.language_name, language_code, request.english_text,
                 ),
             }]
 
@@ -193,7 +185,7 @@ async def translate_verse_stream(
                 conversation_id=None,          # No chat persistence
                 context_window=context_window,
                 thinking_enabled=False,        # Explicit: no thinking for translation
-                pace_seconds=2.0,
+                pace_seconds=2.0,              # Rate limit mitigation (30K TPM tier)
             ):
                 yield line
 
@@ -259,30 +251,17 @@ async def translate_batch_stream(
             language_code = language.lower().replace(' ', '_').replace('-', '_')
             db = await get_mongodb_connector()
 
-            # verse_list is built before .format() — safe for english_text with { }
-            verse_list = "\n".join(
-                f"  Verse {v.verse_number}: \"{v.english_text}\""
-                for v in request.verses
-            )
+            system = _BATCH_SYSTEM
 
-            system = BATCH_TRANSLATION_SYSTEM_PROMPT.format(
-                language_name=request.language_name,
-                language_code=language_code,
-                book_name=request.book_name,
-                chapter=chapter,
-                verse_count=len(request.verses),
-                verse_list=verse_list,
-            )
-
-            # Emit system prompt + HMAC signature — frontend echoes both back on every resume call
-            yield f"data: {json.dumps({'type': 'batch_system_prompt', 'system': system, 'system_prompt_sig': _sign_prompt(system)})}\n\n"
+            # Emit static system prompt + pre-signed HMAC — frontend echoes both back on every resume call
+            yield f"data: {json.dumps({'type': 'batch_system_prompt', 'system': system, 'system_prompt_sig': _BATCH_SYSTEM_SIG})}\n\n"
 
             messages = [{
                 "role": "user",
-                "content": (
-                    f"Please translate the following {len(request.verses)} verse(s) from "
-                    f"{request.book_name} chapter {chapter} into {request.language_name}, "
-                    f"one at a time, starting with verse {request.verses[0].verse_number}."
+                "content": _build_batch_user_message(
+                    request.book_name, chapter,
+                    request.language_name, language_code,
+                    request.verses,
                 ),
             }]
 
@@ -296,7 +275,7 @@ async def translate_batch_stream(
                     conversation_id=None,
                     context_window=context_window,
                     thinking_enabled=False,
-                    pace_seconds=2.0,
+                    pace_seconds=2.0,              # Rate limit mitigation (30K TPM tier)
                 ),
                 messages,
             ):
@@ -370,7 +349,7 @@ async def translate_batch_resume(
                     conversation_id=None,
                     context_window=context_window,
                     thinking_enabled=False,
-                    pace_seconds=2.0,
+                    pace_seconds=2.0,              # Rate limit mitigation (30K TPM tier)
                 ),
                 messages,
             ):

@@ -373,5 +373,5 @@ class TestSaveResultToFile:
 
         # Read back and verify
         saved_file = tmp_path / "json_test.json"
-        content = json.loads(saved_file.read_text())
+        content = json.loads(saved_file.read_text(encoding='utf-8'))
         assert content == data

@@ -20,11 +20,7 @@ npm install
 
 ### 2. Configure Environment
 
-Create a `.env` file in the `front_end/` directory:
-
-```env
-VITE_API_BASE_URL=http://localhost:8221/api
-```
+No `.env` file is required. The API base URL is hardcoded in `src/renderer/api.ts` as `http://127.0.0.1:8221/api`.
 
 ### 3. Verify Backend
 
@@ -151,12 +147,7 @@ The project uses **Vitest** with two separate configurations:
 
 ### Running Tests
 
-```bash
-npm test              # All tests (main + renderer, single run)
-npm run test:main     # Main process tests only
-npm run test:renderer # Renderer tests only
-npm run test:coverage # With coverage report
-```
+See [README](../docs/README.md#running-tests) for the test commands. Configuration details:
 
 ### Test Configurations
 
@@ -295,9 +286,8 @@ npm run lint && npm test && npm run build
 
 ### DevTools Access
 
-1. **Menu**: View > Show Console Log (Ctrl+Shift+C / Alt+Cmd+C)
-2. **TopBar**: View submenu > Show Console Log
-3. **Programmatic**: `window.api.openDevTools()`
+DevTools is toggled via the Electron application menu: **View > Toggle Developer Tools**.
+There is no programmatic `window.api` method for this — it is handled by the main process menu role (`toggleDevTools`).
 
 ### Console Logging
 
@@ -393,13 +383,6 @@ Key settings:
 - `base: './'`: Relative paths for Electron file:// protocol
 
 ## Common Issues
-
-### "VITE_API_BASE_URL is not defined"
-
-Create `.env` file:
-```env
-VITE_API_BASE_URL=http://localhost:8221/api
-```
 
 ### Main Process Changes Not Reflected
 

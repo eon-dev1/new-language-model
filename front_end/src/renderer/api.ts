@@ -8,12 +8,7 @@
  * to localhost only and MongoDB provides its own authentication.
  */
 
-const API_BASE_URL: string | undefined = import.meta.env.VITE_API_BASE_URL;
-
-if (!API_BASE_URL) {
-  console.error('[API] VITE_API_BASE_URL is not defined. Please define it in your .env file.');
-  throw new Error('VITE_API_BASE_URL is not defined.');
-}
+const API_BASE_URL = 'http://127.0.0.1:8221/api';
 
 /**
  * Makes a request to the API with error handling.
@@ -1121,6 +1116,10 @@ export interface ChatConfig {
   api_key_preview: string;
   local_base_url: string;
   local_model: string;
+  has_openrouter_key: boolean;
+  openrouter_key_preview: string;
+  openrouter_model: string;
+  thinking_enabled: boolean;
 }
 
 export async function fetchChatConfig(): Promise<ChatConfig> {
@@ -1140,7 +1139,7 @@ export async function fetchChatSkills(): Promise<QuickActionSkill[]> {
   return response.json();
 }
 
-export async function saveChatConfig(updates: Record<string, string>): Promise<ChatConfig> {
+export async function saveChatConfig(updates: Record<string, string | boolean>): Promise<ChatConfig> {
   const response = await makeRequest('/chat/config', {
     method: 'POST',
     body: JSON.stringify(updates),

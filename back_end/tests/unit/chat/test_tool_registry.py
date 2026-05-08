@@ -135,7 +135,7 @@ class TestExtractionCompleteness:
         chat_src = (
             pathlib.Path(__file__).parent.parent.parent.parent
             / "routes" / "chat.py"
-        ).read_text()
+        ).read_text(encoding='utf-8')
         tree = ast.parse(chat_src)
         defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
         assert "_get_context_window" not in defined, (

@@ -36,7 +36,8 @@ def _ensure_mongod():
         yield
         return
 
-    mongod_bin = Path.home() / ".nlm" / "bin" / "mongod"
+    mongod_name = "mongod.exe" if sys.platform == "win32" else "mongod"
+    mongod_bin = Path.home() / ".nlm" / "bin" / mongod_name
     if not mongod_bin.exists():
         pytest.fail(f"Bundled mongod not found at {mongod_bin}. Run the download script first.")
 
@@ -49,7 +50,7 @@ def _ensure_mongod():
         [str(mongod_bin), "--port", "27019", "--dbpath", str(db_path), "--bind_ip", "127.0.0.1"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        env={**os.environ, "GLIBC_TUNABLES": "glibc.pthread.rseq=0"},
+        env={**os.environ, "GLIBC_TUNABLES": "glibc.pthread.rseq=0"} if sys.platform == "linux" else {**os.environ},
     )
 
     # Poll until port opens or process dies

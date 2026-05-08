@@ -287,7 +287,7 @@ class TestGetBibleChunkSaveToFile:
         )
 
         saved_file = tmp_path / "data_check.json"
-        content = json.loads(saved_file.read_text())
+        content = json.loads(saved_file.read_text(encoding='utf-8'))
 
         assert "verses" in content
         assert "total" in content
@@ -322,7 +322,7 @@ class TestGetBibleChunkSaveToFile:
         )
 
         saved_file = tmp_path / "count_check.json"
-        content = json.loads(saved_file.read_text())
+        content = json.loads(saved_file.read_text(encoding='utf-8'))
 
         assert result["record_count"] == len(content["verses"])
 
@@ -345,7 +345,7 @@ class TestGetBibleChunkSaveToFile:
         )
 
         saved_file = tmp_path / "filtered.json"
-        content = json.loads(saved_file.read_text())
+        content = json.loads(saved_file.read_text(encoding='utf-8'))
 
         # Filters should be applied
         for verse in content["verses"]:
@@ -473,7 +473,7 @@ class TestSaveBibleBatches:
 
         # Read the saved file and check first verse is verse 1
         saved_file = tmp_path / result["files"][0]["filename"]
-        content = json.loads(saved_file.read_text())
+        content = json.loads(saved_file.read_text(encoding='utf-8'))
         assert content["verses"][0]["verse"] == 1
 
     @pytest.mark.asyncio
@@ -722,7 +722,7 @@ class TestSaveBibleBatches:
 
         # Read saved file and verify all verses are genesis
         saved_file = tmp_path / result["files"][0]["filename"]
-        content = json.loads(saved_file.read_text())
+        content = json.loads(saved_file.read_text(encoding='utf-8'))
         for verse in content["verses"]:
             assert verse["book_code"] == "genesis"
 
@@ -1140,6 +1140,6 @@ class TestGetParallelVerses:
         saved_file = tmp_path / "parallel_output.json"
         assert saved_file.exists()
 
-        content = json.loads(saved_file.read_text())
+        content = json.loads(saved_file.read_text(encoding='utf-8'))
         assert "parallel_verses" in content
         assert "languages" in content

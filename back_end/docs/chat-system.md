@@ -38,9 +38,9 @@ Frontend (ChatDrawer / BibleReader)
 | utils/           |  | shared/          |
 | llm_provider.py  |  | tool_registry.py |
 | - Anthropic SDK  |  | - 20 tools       |
-| - Local LLM      |  | - read/write     |
-+------------------+  | - dispatch       |
-                      +------------------+
+| - OpenRouter     |  | - read/write     |
+| - Local LLM      |  | - dispatch       |
++------------------+  +------------------+
                               |
                               v
                       MongoDB (via MCP tool implementations)
@@ -48,12 +48,13 @@ Frontend (ChatDrawer / BibleReader)
 
 ## LLM Provider (`utils/llm_provider.py`)
 
-A single `AnthropicProvider` class handles both Anthropic API and local LLM servers. Both use the Anthropic Messages API format — llama.cpp supports `/v1/messages` natively.
+`get_provider()` returns the right provider class based on `llm_provider` in `~/.nlm/chat_config.json`.
 
-| Provider | `api_key` | `base_url` | Thinking |
-|----------|-----------|------------|----------|
-| Anthropic | Real API key | None (default) | Enabled (except Haiku) |
-| Local | `"local"` (placeholder) | e.g. `http://127.0.0.1:8080` | Disabled |
+| Provider | Class | Notes |
+|----------|-------|-------|
+| `"anthropic"` | `AnthropicProvider` | Direct Anthropic API |
+| `"openrouter"` | `AnthropicProvider` (non-Qwen) or `OpenAIProvider` (Qwen) | Routes through `https://openrouter.ai/api`; Qwen models use the OpenAI-compatible endpoint via `utils/openai_provider.py` |
+| `"local"` | `AnthropicProvider` | Points to a local llama.cpp server; llama.cpp supports `/v1/messages` natively |
 
 **Thinking support**: When enabled, uses beta header `interleaved-thinking-2025-05-14` with a budget of 8,000 tokens and max output of 16,192 tokens. Auto-disabled for local providers and Haiku models.
 
@@ -64,9 +65,12 @@ A single `AnthropicProvider` class handles both Anthropic API and local LLM serv
   "llm_provider": "anthropic",
   "anthropic_api_key": "sk-ant-...",
   "anthropic_model": "claude-sonnet-4-6",
+  "openrouter_api_key": "",
+  "openrouter_model": "anthropic/claude-sonnet-4.6",
   "local_base_url": "http://127.0.0.1:8080",
   "local_model": "default",
-  "local_context_window": 128000
+  "local_context_window": 128000,
+  "thinking_enabled": true
 }
 ```
 
@@ -197,12 +201,15 @@ Two MongoDB connection patterns coexist:
 
 ## Skills
 
-Skill files live in `back_end/prompts/skills/`. Two patterns exist:
+Skill files live in `back_end/prompts/skills/`. Three patterns exist:
 
 | Skill | Files | Discoverable | Injection |
 |-------|-------|-------------|-----------|
 | `generate-dictionary-entries` | `skill.json` + `SKILL.md` | Yes (via `GET /api/chat/skills`) | User-triggered |
-| `translation-triologue` | `SKILL.md` only | No | Auto-injected when `chat_mode == "think_harder"` |
+| `translation-triologue` | `SKILL.md` only | No | Auto-injected when `chat_mode == "think_harder"` (`routes/chat.py:102–126`) |
+| `verse-translation` | `SKILL.md` only | No | Auto-loaded at startup into the translate route system prompt (`routes/translate.py:60`) |
+| `translation-roundtable` | `SKILL.md` only | No | On disk; not loaded by any route — available for manual use |
+| `verse_translation_tools` | `SKILL.md` only | No | On disk; not loaded by any route — available for manual use |
 
 When `think_harder` mode is active, the triologue skill content is appended to the last user message before sending to the LLM (`routes/chat.py:102-126`).
 
@@ -210,11 +217,12 @@ When `think_harder` mode is active, the triologue skill content is appended to t
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `shared/llm_tool_loop.py` | 329 | Shared streaming tool-use loop |
-| `utils/llm_provider.py` | 185 | LLM provider abstraction (Anthropic + local) |
-| `shared/tool_registry.py` | 610 | Tool definitions, dispatch, read/write classification |
-| `shared/chat_config.py` | 104 | `~/.nlm/chat_config.json` management |
-| `routes/chat.py` | 258 | Chat streaming + tool-result endpoints |
-| `routes/translate.py` | 396 | Single + batch translation endpoints |
+| `shared/llm_tool_loop.py` | 332 | Shared streaming tool-use loop |
+| `utils/llm_provider.py` | 255 | LLM provider abstraction (Anthropic, OpenRouter, local) |
+| `utils/openai_provider.py` | — | OpenAI-compatible provider for Qwen models via OpenRouter |
+| `shared/tool_registry.py` | 609 | Tool definitions, dispatch, read/write classification |
+| `shared/chat_config.py` | 113 | `~/.nlm/chat_config.json` management |
+| `routes/chat.py` | 257 | Chat streaming + tool-result endpoints |
+| `routes/translate.py` | 374 | Single + batch translation endpoints |
 | `utils/chat_context.py` | — | Assembles MongoDB data context for system prompt |
 | `shared/system_prompt.py` | — | Static system prompt for general chat |

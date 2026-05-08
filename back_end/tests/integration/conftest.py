@@ -16,7 +16,7 @@ async def db():
 
 @pytest.fixture(scope="module")
 def mongodb_settings():
-    """Load MongoDB settings from the two-tier credential system."""
+    """Load MongoDB settings from ~/.nlm/mongodb_credentials.env."""
     return MongoDBSettings.create_from_credentials()
 
 

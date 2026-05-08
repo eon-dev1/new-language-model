@@ -27,7 +27,6 @@ class TestDbConnectorStructure:
         "__init__.py",
         "settings.py",
         "connection.py",
-        "mongo_credentials_path.env"
     ])
     def test_required_files_exist(self, file_name):
         """Test that all required files exist."""
@@ -129,40 +128,6 @@ class TestClassStructure:
         attr = getattr(MongoDBConnector, property_name)
         assert isinstance(attr, property), \
             f"MongoDBConnector.{property_name} should be a property"
-
-
-class TestEnvironmentConfiguration:
-    """Test environment configuration and credential loading."""
-
-    def test_credentials_path_file_exists(self):
-        """Test that mongo_credentials_path.env file exists."""
-        credentials_path_file = DB_CONNECTOR_PATH / "mongo_credentials_path.env"
-        assert credentials_path_file.exists()
-
-    def test_credentials_path_file_readable(self):
-        """Test that mongo_credentials_path.env file is readable."""
-        credentials_path_file = DB_CONNECTOR_PATH / "mongo_credentials_path.env"
-        with open(credentials_path_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-            assert isinstance(content, str)
-            assert len(content.strip()) > 0
-
-    @pytest.mark.parametrize("required_key", ['MONGODB_CREDENTIALS_PATH', 'DATABASE_NAME'])
-    def test_credentials_path_file_contains_required_keys(self, required_key):
-        """Test that mongo_credentials_path.env contains required configuration keys."""
-        credentials_path_file = DB_CONNECTOR_PATH / "mongo_credentials_path.env"
-
-        found_keys = set()
-
-        with open(credentials_path_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key = line.split('=', 1)[0].strip()
-                    found_keys.add(key)
-
-        assert required_key in found_keys, \
-            f"Required key '{required_key}' not found in mongo_credentials_path.env"
 
 
 class TestModuleInitialization:

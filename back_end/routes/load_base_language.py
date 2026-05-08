@@ -30,7 +30,7 @@ router = APIRouter()
 ENGLISH_LANGUAGE_CODE = "english"
 ENGLISH_LANGUAGE_NAME = "English"
 
-# routes/ → back_end/ → project root → data/bibles/eng-web_usfm/
+# routes/ → back_end/ → [project_root] → data/bibles/eng-web_usfm/
 BUNDLED_ENGLISH_USFM = Path(__file__).parent.parent.parent / "data" / "bibles" / "eng-web_usfm"
 
 SUPPORTED_BASE_LANGUAGES = {ENGLISH_LANGUAGE_CODE}

@@ -1,9 +1,9 @@
 // main.ts
 import { closeLog } from './logger';
 
-import { app, BrowserWindow, Menu, MenuItemConstructorOptions, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, Menu, MenuItemConstructorOptions, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
-import { getDevToolsState, getStartupPreference, toggleDevTools as toggleDevToolsState, initDevToolsManager } from './devtools-manager';
+import { getStartupPreference } from './devtools-manager';
 import { ensureBackendRunning, stopBackend, isBackendManagedByUs } from './backend-manager';
 import { ensureMongodRunning, stopMongod } from './mongod-manager';
 
@@ -17,9 +17,6 @@ let mainWindow: BrowserWindow | null = null;
  * @returns The built menu from template
  */
 function createMainMenu() {
-  const devToolsOpen = getDevToolsState();
-  console.log("Creating main menu - DevTools state:", devToolsOpen);
-  
   const template: MenuItemConstructorOptions[] = [
     {
       label: 'File',
@@ -37,32 +34,11 @@ function createMainMenu() {
     },
     {
       label: 'View',
-      click: () => {
-        console.log("View menu clicked!");
-      },
       submenu: [
-        { role: 'reload' }, 
+        { role: 'reload' },
         { role: 'togglefullscreen' },
         { type: 'separator' },
-        {
-          label: 'Show Console Log',
-          accelerator: process.platform === 'darwin' ? 'Alt+Command+C' : 'Ctrl+Shift+C',
-          click: () => {
-            console.log("Show Console Log menu item clicked!");
-            if (mainWindow) {
-              // Open DevTools and focus on Console tab
-              if (!mainWindow.webContents.isDevToolsOpened()) {
-                mainWindow.webContents.openDevTools({ mode: 'detach' });
-              }
-              // Execute JavaScript to focus Console tab in DevTools
-              mainWindow.webContents.executeJavaScript(`
-                // Focus the console tab in DevTools (this runs in the renderer context)
-                console.log('Console log viewer opened via menu');
-              `);
-              console.log("Console log viewer opened via View menu");
-            }
-          }
-        }
+        { role: 'toggleDevTools' },
       ],
     },
     {
@@ -179,12 +155,15 @@ ipcMain.on('window-maximize', () => {
 });
 ipcMain.on('window-close', () => mainWindow?.close());
 
-// IPC handler for DevTools
-ipcMain.on('open-devtools', () => {
-  if (mainWindow && !mainWindow.webContents.isDevToolsOpened()) {
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
-    console.log('[IPC] DevTools opened via renderer request');
+// IPC handler for opening external URLs in the system browser
+ipcMain.handle('open-external', (_event, url: string) => {
+  if (typeof url !== 'string') return;
+  try {
+    if (new URL(url).protocol !== 'https:') return;
+  } catch {
+    return;
   }
+  return shell.openExternal(url);
 });
 
 // IPC handler for folder selection dialog

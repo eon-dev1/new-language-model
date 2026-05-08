@@ -2,11 +2,9 @@
 
 MCP (Model Context Protocol) server exposing MongoDB collections to Claude Code/Desktop for AI-assisted dictionary generation, grammar analysis, and translation verification.
 
-## Installation
+## Setup
 
-```bash
-pip install "mcp[cli]"
-```
+`mcp` is included in `back_end/requirements.txt`. See the [repo root README](../../../README.md) for full setup instructions.
 
 ## Running the Server
 
@@ -25,7 +23,7 @@ Add to your project-level `.mcp.json` or `~/.claude.json`:
     "nlm-database": {
       "command": "python",
       "args": ["-m", "mcp_server.server"],
-      "cwd": "/path/to/nlm/back_end"
+      "cwd": "/path/to/back_end"
     }
   }
 }

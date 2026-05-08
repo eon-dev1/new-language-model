@@ -3,14 +3,13 @@
 Pytest fixtures for MongoDB db_connector unit tests (no live DB required).
 
 Fixture Dependency Graph:
-    mongodb_settings (sync)
+    mongodb_settings (sync, reads ~/.nlm/mongodb_credentials.env)
            ↓
     connector (async, unconnected)
 """
 
 import pytest
 import pytest_asyncio
-from pathlib import Path
 
 from db_connector.settings import MongoDBSettings
 from db_connector.connection import MongoDBConnector
@@ -21,17 +20,11 @@ from db_connector.connection import MongoDBConnector
 @pytest.fixture(scope="module")
 def mongodb_settings():
     """
-    Load MongoDB settings from the two-tier credential system.
+    Load MongoDB settings from ~/.nlm/mongodb_credentials.env.
 
     Module-scoped to avoid repeated credential file reads.
     """
     return MongoDBSettings.create_from_credentials()
-
-
-@pytest.fixture
-def credentials_path_file():
-    """Path to the Tier 1 credentials pointer file."""
-    return Path(__file__).parent.parent.parent.parent / "db_connector" / "mongo_credentials_path.env"
 
 
 # === CONNECTOR FIXTURES ===

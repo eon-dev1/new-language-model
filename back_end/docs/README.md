@@ -15,48 +15,17 @@ The NLM (New Language Model) Backend is a FastAPI-based REST API that powers a B
 
 **Note**: API authentication has been disabled for local development. MongoDB provides its own authentication layer.
 
-## Quick Start
+## Setup
 
-## Start server 
-~/.nlm/bin/mongod --port 27019 --dbpath ~/.nlm/db
+See the [repo root README](../../README.md) for full setup instructions (Python venv, pip install, MongoDB credentials).
 
-### Prerequisites
+## Running the Server
 
-- Python 3.12+
-- MongoDB Atlas account (or local MongoDB instance)
-- Virtual environment
-
-### Installation
+Activate the venv first, then:
 
 ```bash
 cd back_end
 
-# Create and activate virtual environment
-python -m venv nlm_backend_venv
-source nlm_backend_venv/bin/activate  # Linux/Mac
-# OR
-nlm_backend_venv\Scripts\activate     # Windows
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### Configuration
-
-1. Create `db_connector/mongo_credentials_path.env`:
-```env
-MONGODB_CREDENTIALS_PATH="/path/to/your/credentials.env"
-DATABASE_NAME="nlm_db"
-```
-
-2. Create your credentials file at the path specified above:
-```env
-MONGODB_CONNECTION_STRING="mongodb+srv://user:password@cluster.mongodb.net/"
-```
-
-### Running the Server
-
-```bash
 # Standard startup
 python main.py
 
@@ -66,21 +35,19 @@ python -m uvicorn main:app --host 127.0.0.1 --port 8221 --reload
 
 The server binds to `localhost:8221` only (not exposed to external networks).
 
-### Running Tests
+## Running Tests
 
 ```bash
-# Run all tests
-pytest
+cd back_end
+# activate venv first
 
-# Run with verbose output
-pytest -v
-
-# Run specific test file
-pytest tests/unit/db_connector/test_mongodb_connection.py
-
-# Run specific test by name
-pytest -k "test_settings_creation_succeeds"
+pytest        # all tests
+pytest -v     # verbose
+pytest tests/unit/db_connector/test_mongodb_connection.py  # specific file
+pytest -k "test_settings_creation_succeeds"                # specific test
 ```
+
+Route tests require MongoDB. The test suite auto-starts `mongod` from `~/.nlm/bin/mongod` if it's not already running.
 
 ## Directory Structure
 
@@ -92,8 +59,7 @@ back_end/
 |
 |-- db_connector/               # Database connection layer
 |   |-- connection.py           # MongoDBConnector class (Motor async driver)
-|   |-- settings.py             # Two-tier credential loading system
-|   |-- mongo_credentials_path.env  # Tier 1: path to actual credentials
+|   |-- settings.py             # Loads credentials from ~/.nlm/mongodb_credentials.env
 |
 |-- routes/                     # API endpoint handlers (20 route modules)
 |   |-- dependencies.py         # Shared get_db() dependency injection
@@ -104,6 +70,13 @@ back_end/
 |   |-- import_bible.py         # USFM import
 |   |-- import_html_bible.py    # HTML import
 |   |-- ...                     # (and more)
+|
+|-- shared/                     # Core AI/chat infrastructure
+|   |-- llm_tool_loop.py        # Streaming tool-use loop (shared by chat + translate)
+|   |-- tool_registry.py        # Tool definitions, dispatch, read/write classification
+|   |-- chat_config.py          # ~/.nlm/chat_config.json management
+|   |-- model_registry.py       # LLM model metadata (thinking support, API format)
+|   |-- system_prompt.py        # Static system prompt for general chat
 |
 |-- mcp_server/                 # MCP server for Claude tool access
 |
@@ -199,21 +172,7 @@ When running the backend standalone (`python main.py` outside Electron), start M
 ~/.nlm/bin/mongod --port 27019 --dbpath ~/.nlm/db
 ```
 
-### Credentials Setup
-
-1. Create credentials file:
-```bash
-mkdir -p ~/.nlm
-echo 'MONGODB_CONNECTION_STRING="mongodb://localhost:27019"' > ~/.nlm/mongodb_credentials.env
-```
-
-2. Update `db_connector/mongo_credentials_path.env`:
-```env
-MONGODB_CREDENTIALS_PATH='/home/YOUR_USER/.nlm/mongodb_credentials.env'
-DATABASE_NAME='nlm_db'
-```
-
-### Verify Connection
+Verify the connection:
 
 ```bash
 mongosh --port 27019 --eval "db.runCommand({ping: 1})"

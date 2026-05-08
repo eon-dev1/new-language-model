@@ -342,13 +342,13 @@ Resume a paused chat stream after user approves/rejects a write tool.
 
 Get current LLM configuration (API key masked).
 
-**Response**: `{llm_provider, anthropic_model, has_api_key, api_key_preview, local_base_url, local_model, local_context_window}`
+**Response**: `{llm_provider, anthropic_model, has_api_key, api_key_preview, has_openrouter_key, openrouter_key_preview, openrouter_model, local_base_url, local_model, local_context_window, thinking_enabled}`
 
 #### POST /api/chat/config
 
 Update LLM configuration.
 
-**Body**: `{llm_provider?, anthropic_api_key?, anthropic_model?, local_base_url?, local_model?}`
+**Body**: `{llm_provider?, anthropic_api_key?, anthropic_model?, openrouter_api_key?, openrouter_model?, local_base_url?, local_model?, thinking_enabled?}`
 
 #### POST /api/chat/test-connection
 
@@ -577,12 +577,7 @@ app.add_middleware(
 
 ## Interactive Documentation
 
-When the server is running, access auto-generated documentation at:
-
-- **Swagger UI**: http://localhost:8221/docs
-- **ReDoc**: http://localhost:8221/redoc
-
-These interfaces allow testing endpoints directly in the browser.
+Swagger UI and ReDoc are disabled (`docs_url=None, redoc_url=None, openapi_url=None` in `main.py`). Use this document or direct `curl`/`httpie` calls to explore the API.
 
 ## Code Examples
 

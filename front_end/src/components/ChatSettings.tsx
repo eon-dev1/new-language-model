@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Box, Typography, TextField, IconButton, Divider, Select, MenuItem,
+  Box, Typography, TextField, IconButton, Divider, Select, MenuItem, ListSubheader,
   FormControl, InputLabel, Button, Alert, CircularProgress,
   Switch, FormControlLabel,
 } from '@mui/material';
@@ -23,6 +23,15 @@ const ANTHROPIC_MODELS = [
 ];
 const VALID_MODEL_IDS = new Set(ANTHROPIC_MODELS.map(m => m.id));
 
+const OPENROUTER_MODELS = [
+  { id: 'anthropic/claude-opus-4.6',   label: 'Opus 4.6',      group: 'Anthropic' },
+  { id: 'anthropic/claude-sonnet-4.6', label: 'Sonnet 4.6',    group: 'Anthropic' },
+  { id: 'anthropic/claude-haiku-4.5',  label: 'Haiku 4.5',     group: 'Anthropic' },
+  { id: 'qwen/qwen3.5-397b-a17b',      label: 'Qwen 3.5 397B', group: 'Qwen' },
+  { id: 'qwen/qwen3.5-35b-a3b',        label: 'Qwen 3.5 35B',  group: 'Qwen' },
+];
+const VALID_OPENROUTER_MODEL_IDS = new Set(OPENROUTER_MODELS.map(m => m.id));
+
 export const ChatSettings: React.FC<Props> = ({ onBack }) => {
   const { settings, updateSettings } = useSettings();
   const [config, setConfig] = useState<ChatConfig | null>(null);
@@ -40,6 +49,10 @@ export const ChatSettings: React.FC<Props> = ({ onBack }) => {
   const [localUrl, setLocalUrl] = useState('http://127.0.0.1:8080');
   const [localModel, setLocalModel] = useState('default');
   const [showApiKey, setShowApiKey] = useState(false);
+  const [openrouterKey, setOpenrouterKey] = useState('');
+  const [openrouterModel, setOpenrouterModel] = useState('anthropic/claude-sonnet-4.6');
+  const [showOpenrouterKey, setShowOpenrouterKey] = useState(false);
+  const [thinkingEnabled, setThinkingEnabled] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -50,7 +63,9 @@ export const ChatSettings: React.FC<Props> = ({ onBack }) => {
         setModel(VALID_MODEL_IDS.has(cfg.anthropic_model) ? cfg.anthropic_model : 'claude-sonnet-4-6');
         setLocalUrl(cfg.local_base_url);
         setLocalModel(cfg.local_model);
-        // API key is masked — don't populate the field
+        setOpenrouterModel(VALID_OPENROUTER_MODEL_IDS.has(cfg.openrouter_model) ? cfg.openrouter_model : 'anthropic/claude-sonnet-4.6');
+        setThinkingEnabled(cfg.thinking_enabled ?? true);
+        // API keys are masked — don't populate the fields
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -64,18 +79,24 @@ export const ChatSettings: React.FC<Props> = ({ onBack }) => {
     setError(null);
     setSuccess(false);
     try {
-      const updates: Record<string, string> = {
+      const updates: Record<string, string | boolean> = {
         llm_provider: provider,
         anthropic_model: model,
         local_base_url: localUrl,
         local_model: localModel,
+        openrouter_model: openrouterModel,
+        thinking_enabled: thinkingEnabled,
       };
       if (apiKey) {
         updates.anthropic_api_key = apiKey;
       }
+      if (openrouterKey) {
+        updates.openrouter_api_key = openrouterKey;
+      }
       await saveChatConfig(updates);
       setSuccess(true);
-      setApiKey('');  // Clear after save
+      setApiKey('');
+      setOpenrouterKey('');
       // Refresh config to get updated preview
       const cfg = await fetchChatConfig();
       setConfig(cfg);
@@ -118,6 +139,7 @@ export const ChatSettings: React.FC<Props> = ({ onBack }) => {
           >
             <MenuItem value="anthropic">Anthropic API</MenuItem>
             <MenuItem value="local">Local LLM</MenuItem>
+            <MenuItem value="openrouter">OpenRouter</MenuItem>
           </Select>
         </FormControl>
 
@@ -147,6 +169,44 @@ export const ChatSettings: React.FC<Props> = ({ onBack }) => {
                 onChange={e => setModel(e.target.value)}
               >
                 {ANTHROPIC_MODELS.map(m => (
+                  <MenuItem key={m.id} value={m.id}>{m.label}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </>
+        )}
+
+        {provider === 'openrouter' && (
+          <>
+            <TextField
+              fullWidth
+              size="small"
+              label={config?.has_openrouter_key && !openrouterKey ? `API Key (saved: ${config.openrouter_key_preview})` : 'API Key'}
+              type={showOpenrouterKey ? 'text' : 'password'}
+              value={openrouterKey}
+              onChange={e => setOpenrouterKey(e.target.value)}
+              placeholder={config?.has_openrouter_key ? 'Enter new key to replace' : 'Enter OpenRouter API key'}
+              InputProps={{
+                endAdornment: (
+                  <IconButton size="small" onClick={() => setShowOpenrouterKey(!showOpenrouterKey)}>
+                    {showOpenrouterKey ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                  </IconButton>
+                ),
+              }}
+            />
+            <FormControl fullWidth size="small">
+              <InputLabel>Model</InputLabel>
+              <Select
+                value={openrouterModel}
+                label="Model"
+                onChange={e => setOpenrouterModel(e.target.value)}
+              >
+                <ListSubheader>Anthropic</ListSubheader>
+                {OPENROUTER_MODELS.filter(m => m.group === 'Anthropic').map(m => (
+                  <MenuItem key={m.id} value={m.id}>{m.label}</MenuItem>
+                ))}
+                <ListSubheader>Qwen</ListSubheader>
+                {OPENROUTER_MODELS.filter(m => m.group === 'Qwen').map(m => (
                   <MenuItem key={m.id} value={m.id}>{m.label}</MenuItem>
                 ))}
               </Select>
@@ -229,6 +289,23 @@ export const ChatSettings: React.FC<Props> = ({ onBack }) => {
             </Typography>
           }
         />
+        <Divider sx={{ my: 1.5, borderColor: 'rgba(255,255,255,0.08)' }} />
+        <Typography variant="caption" sx={{ opacity: 0.45, display: 'block', mb: 0.5, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+          AI Thinking
+        </Typography>
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={thinkingEnabled}
+              onChange={(e) => setThinkingEnabled(e.target.checked)}
+            />
+          }
+          label={<Typography variant="body2" sx={{ opacity: 0.75 }}>Enable thinking modes</Typography>}
+        />
+        <Typography variant="caption" sx={{ opacity: 0.4, display: 'block', mt: 0.5 }}>
+          When off, Think and Think Harder modes are hidden globally
+        </Typography>
       </Box>
     </Box>
   );

@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-- Python 3.12 or higher
+- Python 3.10 or higher
 - MongoDB Atlas account (or local MongoDB 7.0+)
 
 ### Initial Setup
@@ -12,7 +12,7 @@
 1. **Clone the repository**:
    ```bash
    git clone <repository-url>
-   cd nlm/back_end
+   cd back_end
    ```
 
 2. **Create virtual environment**:
@@ -33,15 +33,9 @@
 
 4. **Configure credentials** (see [configuration.md](./configuration.md)):
    ```bash
-   # Create external credentials file
-   mkdir -p ~/secure
-   cat > ~/secure/nlm_credentials.env << EOF
-   MONGODB_CONNECTION_STRING="mongodb+srv://user:pass@cluster.mongodb.net/"
-   EOF
-   chmod 600 ~/secure/nlm_credentials.env
-
-   # Update Tier 1 config
-   # Edit db_connector/mongo_credentials_path.env
+   mkdir -p ~/.nlm
+   echo 'MONGODB_CONNECTION_STRING="mongodb://localhost:27019"' > ~/.nlm/mongodb_credentials.env
+   chmod 600 ~/.nlm/mongodb_credentials.env
    ```
 
 5. **Verify setup**:
@@ -70,9 +64,7 @@ LOG_LEVEL=DEBUG python main.py
 
 Once running, the server is available at `http://localhost:8221`.
 
-**Interactive Documentation**:
-- Swagger UI: http://localhost:8221/docs
-- ReDoc: http://localhost:8221/redoc
+Swagger UI and ReDoc are disabled. See `back_end/docs/api.md` for the full endpoint reference.
 
 **Test with curl**:
 ```bash
@@ -105,6 +97,9 @@ back_end/
 |       |-- chat/
 |       |-- mcp_server/
 |       |-- schema_enforcer/
+|       |-- shared/
+|           |-- test_model_registry.py
+|           |-- test_system_prompt.py
 |       |-- word_index/
 |   |-- integration/
 ```
@@ -142,10 +137,15 @@ pytest --cov=. --cov-report=html
 `pytest.ini`:
 ```ini
 [pytest]
+pythonpath = .
+testpaths = tests
+asyncio_mode = auto
 log_cli = true
 log_level = DEBUG
 log_format = %(asctime)s [%(levelname)s] %(name)s: %(message)s
 log_date_format = %Y-%m-%d %H:%M:%S
+markers =
+    integration: Tests requiring real filesystem resources (deselect with -m 'not integration')
 ```
 
 ### Running Connection Tests Directly
@@ -167,6 +167,7 @@ pytest tests/unit/db_connector/test_mongodb_connection.py -v
 | Directory | Purpose |
 |-----------|---------|
 | `routes/` | FastAPI route handlers |
+| `shared/` | Core AI/chat infrastructure (tool loop, tool registry, chat config, model registry) |
 | `db_connector/` | Database connection and settings |
 | `utils/` | Utility modules and helpers |
 | `mcp_server/` | MCP server for Claude tool access |

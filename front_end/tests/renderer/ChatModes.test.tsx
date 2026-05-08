@@ -22,6 +22,7 @@ import {
   useChat,
   type ChatMode,
 } from '../../src/renderer/contexts/ChatContext';
+import { fetchChatConfig } from '../../src/renderer/api';
 
 // ---------------------------------------------------------------------------
 // Mock all API calls to prevent network requests
@@ -41,6 +42,9 @@ vi.mock('../../src/renderer/api', () => ({
     api_key_preview: '...test',
     local_base_url: '',
     local_model: '',
+    has_openrouter_key: false,
+    openrouter_key_preview: '',
+    openrouter_model: '',
   }),
   fetchChatSkills: vi.fn().mockResolvedValue([]),
 }));
@@ -264,5 +268,94 @@ describe('ChatContext setChatMode', () => {
     // Simulate the TopBar handleModeClick: setChatMode(chatMode === mode ? null : mode)
     act(() => { result.current.setChatMode(null); });
     expect(result.current.chatMode).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isThinkingSupported — OpenRouter provider
+// ---------------------------------------------------------------------------
+
+describe('isThinkingSupported — OpenRouter provider', () => {
+  it('returns true for OpenRouter Sonnet', () => {
+    expect(isThinkingSupported('anthropic/claude-sonnet-4.6', 'openrouter')).toBe(true);
+  });
+
+  it('returns true for OpenRouter Opus', () => {
+    expect(isThinkingSupported('anthropic/claude-opus-4.6', 'openrouter')).toBe(true);
+  });
+
+  it('returns false for OpenRouter Haiku', () => {
+    expect(isThinkingSupported('anthropic/claude-haiku-4.5', 'openrouter')).toBe(false);
+  });
+
+  it('returns false for Qwen models (qwen/ prefix guard)', () => {
+    expect(isThinkingSupported('qwen/qwen3.5-397b-a17b', 'openrouter')).toBe(false);
+    expect(isThinkingSupported('qwen/qwen3.5-35b-a3b', 'openrouter')).toBe(false);
+  });
+
+  it('returns true for unknown openrouter model (safe default)', () => {
+    expect(isThinkingSupported('some-future-provider/model-x', 'openrouter')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// effectiveThinking matrix — OpenRouter cases
+// ---------------------------------------------------------------------------
+
+describe('effectiveThinking matrix — OpenRouter cases', () => {
+  it('think + OpenRouter Sonnet → true', () => {
+    expect(effectiveThinking('think', 'anthropic/claude-sonnet-4.6', 'openrouter')).toBe(true);
+  });
+
+  it('think + OpenRouter Haiku → false', () => {
+    expect(effectiveThinking('think', 'anthropic/claude-haiku-4.5', 'openrouter')).toBe(false);
+  });
+
+  it('think + Qwen → false', () => {
+    expect(effectiveThinking('think', 'qwen/qwen3.5-397b-a17b', 'openrouter')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// refreshCurrentModel — three-provider branching
+// ---------------------------------------------------------------------------
+
+describe('refreshCurrentModel — provider branching', () => {
+  it('sets currentModel from openrouter_model when provider is openrouter', async () => {
+    vi.mocked(fetchChatConfig).mockResolvedValueOnce({
+      llm_provider: 'openrouter',
+      anthropic_model: 'claude-sonnet-4-6',
+      openrouter_model: 'qwen/qwen3.5-397b-a17b',
+      local_model: '',
+      has_api_key: true,
+      api_key_preview: '...test',
+      local_base_url: '',
+      has_openrouter_key: true,
+      openrouter_key_preview: '...abcd',
+    });
+    const { result } = renderChatHook();
+    await act(async () => {});
+
+    expect(result.current.currentModel).toBe('qwen/qwen3.5-397b-a17b');
+    expect(result.current.currentProvider).toBe('openrouter');
+  });
+
+  it('sets currentModel from local_model when provider is local', async () => {
+    vi.mocked(fetchChatConfig).mockResolvedValueOnce({
+      llm_provider: 'local',
+      anthropic_model: 'claude-sonnet-4-6',
+      openrouter_model: '',
+      local_model: 'llama-3.3-70b',
+      has_api_key: false,
+      api_key_preview: '',
+      local_base_url: 'http://127.0.0.1:8080',
+      has_openrouter_key: false,
+      openrouter_key_preview: '',
+    });
+    const { result } = renderChatHook();
+    await act(async () => {});
+
+    expect(result.current.currentModel).toBe('llama-3.3-70b');
+    expect(result.current.currentProvider).toBe('local');
   });
 });

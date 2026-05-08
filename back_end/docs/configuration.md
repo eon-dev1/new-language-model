@@ -2,24 +2,11 @@
 
 ## Overview
 
-The NLM Backend uses a two-tier configuration system designed to:
-
-1. Keep sensitive credentials out of the repository
-2. Allow environment-specific configurations
-3. Support both local development and MongoDB Atlas deployments
-
-## Configuration Files
-
-### File Hierarchy
+The NLM Backend keeps all secrets out of the repository by reading credentials from a single file outside the repo:
 
 ```
-back_end/
-|-- db_connector/
-|   |-- mongo_credentials_path.env       # Tier 1: Points to credentials
-|
-# External (not in repo):
-/secure/location/
-|-- nlm_credentials.env                  # Tier 2: Actual credentials
+~/.nlm/mongodb_credentials.env    # MongoDB credentials (never in repo)
+~/.nlm/chat_config.json           # LLM provider settings (auto-created on first use)
 ```
 
 ---
@@ -41,69 +28,32 @@ FAST_API_PORT=9000 python main.py
 
 ---
 
-## Two-Tier Credential System
+## MongoDB Credentials
 
-### Purpose
+### Credentials File
 
-The two-tier system prevents accidental credential exposure by:
-
-1. Storing only a *path* to credentials in the repository
-2. Keeping actual secrets in an external file
-
-### Tier 1: mongo_credentials_path.env
-
-Located at: `back_end/db_connector/mongo_credentials_path.env`
-
-This file is tracked in the repository and contains:
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `MONGODB_CREDENTIALS_PATH` | Yes | Absolute path to Tier 2 file |
-| `DATABASE_NAME` | Yes | Target MongoDB database name |
-
-**Example**:
-```env
-# mongo_credentials_path.env
-MONGODB_CREDENTIALS_PATH="/home/user/secure/mongodb_atlas.env"
-DATABASE_NAME="nlm_db"   # Required — server raises ValueError if absent
-```
-
-### Tier 2: Actual Credentials File
-
-Located at: Path specified in `MONGODB_CREDENTIALS_PATH`
-
-This file should NOT be in the repository and contains:
+Located at: `~/.nlm/mongodb_credentials.env` (never tracked in the repo)
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `MONGODB_CONNECTION_STRING` | Yes | Full MongoDB connection URI |
+| `DATABASE_NAME` | No | Target database name (default: `"nlm_translator"`) |
 
 **Example**:
 ```env
-# mongodb_atlas.env (external file)
+# ~/.nlm/mongodb_credentials.env
 MONGODB_CONNECTION_STRING="mongodb+srv://username:password@cluster0.abc123.mongodb.net/"
+DATABASE_NAME="nlm_translator"
 ```
 
 ### Loading Process
 
-```python
-# db_connector/settings.py - MongoDBSettings.create_from_credentials()
+`MongoDBSettings.create_from_credentials()` in `db_connector/settings.py`:
 
-# Step 1: Read Tier 1 file
-credentials_path_file = Path(__file__).parent / "mongo_credentials_path.env"
-# Extract MONGODB_CREDENTIALS_PATH and DATABASE_NAME
-
-# Step 2: Read Tier 2 file
-actual_credentials_file = Path(credentials_path)
-# Extract MONGODB_CONNECTION_STRING
-# Set environment variables
-
-# Step 3: Create settings instance
-return cls(
-    mongodb_connection_string=connection_string,
-    database_name=database_name
-)
-```
+1. Opens `~/.nlm/mongodb_credentials.env` — raises `FileNotFoundError` if absent
+2. Parses `KEY=VALUE` lines, stripping matched quote pairs
+3. Raises `ValueError` if `MONGODB_CONNECTION_STRING` is missing
+4. `DATABASE_NAME` is optional; if absent, the class default `"nlm_translator"` applies
 
 ---
 
@@ -121,6 +71,8 @@ Defined in `db_connector/settings.py`:
 | `server_selection_timeout_ms` | 5000 | Time to wait for server selection |
 | `connect_timeout_ms` | 10000 | Connection establishment timeout |
 | `socket_timeout_ms` | 30000 | Socket operation timeout |
+| `health_check_interval` | 30 | Seconds between health checks |
+| `max_reconnect_attempts` | 5 | Maximum reconnection attempts |
 
 ### Connection Options
 
@@ -167,13 +119,22 @@ The chat/translation system stores LLM provider settings in a JSON file outside 
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `llm_provider` | `"anthropic"` | `"anthropic"` or `"local"` |
-| `anthropic_api_key` | `""` | Anthropic API key (required for Anthropic provider) |
+| `llm_provider` | `"anthropic"` | `"anthropic"`, `"openrouter"`, or `"local"` |
+| `anthropic_api_key` | `""` | Anthropic API key (required for `anthropic` provider) |
 | `anthropic_model` | `"claude-sonnet-4-6"` | Claude model to use |
+| `openrouter_api_key` | `""` | OpenRouter API key (required for `openrouter` provider) |
+| `openrouter_model` | `"anthropic/claude-sonnet-4.6"` | Model ID passed to OpenRouter |
 | `local_base_url` | `"http://127.0.0.1:8080"` | Local LLM server URL |
 | `local_model` | `"default"` | Model name for local server |
 | `local_context_window` | `128000` | Context window size for local LLM |
-| `dev_features` | `{}` | Developer feature flags |
+| `thinking_enabled` | `true` | Enable extended thinking for supported models |
+| `dev_features` | `{}` | Developer feature flags (see below) |
+
+**`dev_features` flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `book_of_enoch` | `false` | Enables 1 Enoch as book 67 in the canon. Intended for the rare scenario where a developer knows a low-resource language but it already has both Old and New Testament translations, which could be in the model's training data already. The book of Enoch has a chapter/verse structure and is less likely to be translated into any low resource language |
 
 **Important**: If `anthropic_api_key` is blank when using the Anthropic provider, the chat stream returns an SSE error event: "Anthropic API key not configured. Set it in Chat Settings."
 
@@ -197,15 +158,12 @@ echo 'MONGODB_CONNECTION_STRING="mongodb://localhost:27019"' > ~/.nlm/mongodb_cr
 chmod 600 ~/.nlm/mongodb_credentials.env
 ```
 
-#### 2. Configure Tier 1 (mongo_credentials_path.env)
-
+`DATABASE_NAME` is optional — omit it to use the default `nlm_translator`, or add a second line:
 ```env
-# back_end/db_connector/mongo_credentials_path.env
-MONGODB_CREDENTIALS_PATH='/home/YOUR_USER/.nlm/mongodb_credentials.env'
-DATABASE_NAME='nlm_db'
+DATABASE_NAME="nlm_translator"
 ```
 
-#### 3. Verify Connection
+#### 2. Verify Connection
 
 ```bash
 mongosh --port 27019 --eval "db.runCommand({ping: 1})"
@@ -218,24 +176,22 @@ mongosh --port 27019 --eval "db.runCommand({ping: 1})"
 
 For production or cloud development, use MongoDB Atlas:
 
-1. **Create Tier 2 credentials file**:
+1. **Create credentials file**:
    ```bash
-   mkdir -p ~/secure
-   touch ~/secure/nlm_credentials.env
-   chmod 600 ~/secure/nlm_credentials.env
+   mkdir -p ~/.nlm
+   chmod 700 ~/.nlm
    ```
 
 2. **Add Atlas credentials**:
    ```env
-   # ~/secure/nlm_credentials.env
+   # ~/.nlm/mongodb_credentials.env
    MONGODB_CONNECTION_STRING="mongodb+srv://user:pass@cluster.mongodb.net/"
+   DATABASE_NAME="nlm_translator"
    ```
 
-3. **Configure Tier 1**:
-   ```env
-   # back_end/db_connector/mongo_credentials_path.env
-   MONGODB_CREDENTIALS_PATH="/home/youruser/secure/nlm_credentials.env"
-   DATABASE_NAME="nlm_db"
+3. **Restrict permissions**:
+   ```bash
+   chmod 600 ~/.nlm/mongodb_credentials.env
    ```
 
 ### Production Considerations
@@ -274,15 +230,11 @@ logger = logging.getLogger(__name__)
 
 ### Common Issues
 
-**1. "Credentials path file not found"**
-- Ensure `mongo_credentials_path.env` exists in `db_connector/`
-- Check file contains `MONGODB_CREDENTIALS_PATH=...`
+**1. "MongoDB credentials file not found"**
+- Ensure `~/.nlm/mongodb_credentials.env` exists
+- Check file permissions allow reading (`chmod 600 ~/.nlm/mongodb_credentials.env`)
 
-**2. "MongoDB credentials file not found"**
-- Verify the path in `MONGODB_CREDENTIALS_PATH` is correct
-- Check file permissions allow reading
-
-**3. "MongoDB URI must start with mongodb:// or mongodb+srv://"**
+**2. "MongoDB URI must start with mongodb:// or mongodb+srv://"**
 - Ensure connection string uses one of these prefixes
 - Atlas connections use `mongodb+srv://`; local connections use `mongodb://`
 

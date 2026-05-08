@@ -24,14 +24,19 @@ import {
 // Thinking support
 // ---------------------------------------------------------------------------
 
-const HAIKU_MODEL_IDS = new Set(['claude-haiku-4-5-20251001']);
+const NO_THINKING_MODELS = new Set([
+  'claude-haiku-4-5-20251001',
+  'anthropic/claude-haiku-4.5',
+]);
 
 export type ChatMode = 'think' | 'think_harder' | 'maximum_thinking' | 'deep_research' | null;
 
 export const isThinkingSupported = (model: string | null, provider?: string): boolean => {
   if (!model) return false;
   if (provider === 'local') return false;
-  return !HAIKU_MODEL_IDS.has(model);
+  if (NO_THINKING_MODELS.has(model)) return false;
+  if (model.startsWith('qwen/')) return false;
+  return true;
 };
 
 // ---------------------------------------------------------------------------
@@ -130,6 +135,7 @@ export interface ChatContextType {
   currentModel: string | null;
   currentProvider: string;
   refreshCurrentModel: () => Promise<void>;
+  thinkingEnabled: boolean;
 
   // Tool result preview
   toolResultBuffer: ToolResultEntry[];
@@ -174,6 +180,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
   const [currentModel, setCurrentModel] = useState<string | null>(null);
   const [currentProvider, setCurrentProvider] = useState<string>('anthropic');
+  const [thinkingEnabled, setThinkingEnabled] = useState<boolean>(true);
   const [availableSkills, setAvailableSkills] = useState<QuickActionSkill[]>([]);
   const [toolResultBuffer, setToolResultBuffer] = useState<ToolResultEntry[]>([]);
 
@@ -239,8 +246,12 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const refreshCurrentModel = useCallback(async () => {
     try {
       const cfg = await fetchChatConfig();
-      setCurrentModel(cfg.anthropic_model);
+      const model = cfg.llm_provider === 'openrouter' ? cfg.openrouter_model
+        : cfg.llm_provider === 'local' ? cfg.local_model
+        : cfg.anthropic_model;
+      setCurrentModel(model);
       setCurrentProvider(cfg.llm_provider);
+      setThinkingEnabled(cfg.thinking_enabled ?? true);
     } catch {
       // silent — model stays null, toggle stays disabled
     }
@@ -565,7 +576,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Double-guard: check model support at send time to avoid stale state issues
     const wantsThinking = chatMode === 'think' || chatMode === 'think_harder' || chatMode === 'maximum_thinking';
-    const effectiveThinking = wantsThinking && isThinkingSupported(currentModel, currentProvider);
+    const effectiveThinking = wantsThinking && thinkingEnabled && isThinkingSupported(currentModel, currentProvider);
 
     (async () => {
       setToolResultBuffer([]);
@@ -606,7 +617,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     })();
   }, [isStreaming, messages, appContext, activeConversationId, loadConversations,
-      chatMode, currentModel, currentProvider, clearToolPreviewTimer, processStreamEvents]);
+      chatMode, currentModel, currentProvider, thinkingEnabled, clearToolPreviewTimer, processStreamEvents]);
 
   const quickActions = messages.length === 0
     ? availableSkills.filter(s =>
@@ -628,6 +639,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     openConversation, deleteConversation: deleteConversationHandler,
     chatMode, setChatMode,
     currentModel, currentProvider, refreshCurrentModel,
+    thinkingEnabled,
     toolResultBuffer,
   };
 

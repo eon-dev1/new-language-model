@@ -124,6 +124,14 @@ export const createDynamicTheme = (settings: AppSettings): Theme => {
 
   return createTheme({
     ...BASE_THEME_OPTIONS,
+    components: {
+      ...BASE_THEME_OPTIONS.components,
+      MuiTooltip: {
+        styleOverrides: {
+          tooltip: { fontSize: `${0.75 * scale}rem` },
+        },
+      },
+    },
     typography: {
       fontFamily: fontStack,
       h1: {

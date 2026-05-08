@@ -28,7 +28,7 @@ from routes.dependencies import get_db
 
 @pytest.fixture(scope="module")
 def mongodb_settings():
-    """Load MongoDB settings from the two-tier credential system."""
+    """Load MongoDB settings from ~/.nlm/mongodb_credentials.env."""
     return MongoDBSettings.create_from_credentials()
 
 
@@ -67,7 +67,7 @@ async def async_client(connected_db) -> AsyncGenerator[AsyncClient, None]:
 
     # Create async client with ASGI transport
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
+    async with AsyncClient(transport=transport, base_url="http://localhost") as client:
         yield client
 
     # Clear overrides after test

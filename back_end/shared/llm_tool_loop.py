@@ -31,26 +31,21 @@ MAX_TOTAL_RESULT_CHARS = 500_000
 CONTEXT_BUDGET_PERCENT = 0.80
 MAX_TOOL_CALLS = 50
 
-# Known Anthropic model context windows
-ANTHROPIC_CONTEXT_WINDOWS = {
-    "claude-opus-4-6": 200_000,
-    "claude-sonnet-4-6": 200_000,
-    "claude-haiku-4-5-20251001": 200_000,
-}
-ANTHROPIC_DEFAULT_CONTEXT = 200_000
 LOCAL_DEFAULT_CONTEXT = 128_000
 
 
 def get_context_window() -> int:
     """Return the context window size based on current provider config."""
+    from shared import model_registry
+
     config = load_config()
     provider_type = config.get("llm_provider", "anthropic")
 
     if provider_type == "local":
         return config.get("local_context_window", LOCAL_DEFAULT_CONTEXT)
 
-    model = config.get("anthropic_model", "")
-    return ANTHROPIC_CONTEXT_WINDOWS.get(model, ANTHROPIC_DEFAULT_CONTEXT)
+    model_key = "openrouter_model" if provider_type == "openrouter" else "anthropic_model"
+    return model_registry.get_context_window(config.get(model_key, ""))
 
 
 def _truncate_tool_result(result_str: str) -> str:
@@ -126,7 +121,16 @@ async def run_tool_loop(
 
             elif event["type"] == "usage":
                 current_input_tokens = event["input_tokens"]
-                yield f"data: {json.dumps({'type': 'context_usage', 'input_tokens': current_input_tokens, 'max_tokens': context_window})}\n\n"
+                context_payload: dict = {
+                    "type": "context_usage",
+                    "input_tokens": current_input_tokens,
+                    "max_tokens": context_window,
+                }
+                if event.get("cache_creation_input_tokens"):
+                    context_payload["cache_creation_input_tokens"] = event["cache_creation_input_tokens"]
+                if event.get("cache_read_input_tokens"):
+                    context_payload["cache_read_input_tokens"] = event["cache_read_input_tokens"]
+                yield f"data: {json.dumps(context_payload)}\n\n"
 
             elif event["type"] == "error":
                 yield f"data: {json.dumps(event)}\n\n"
