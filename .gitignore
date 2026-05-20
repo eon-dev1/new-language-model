@@ -43,7 +43,8 @@ front_end/dist/
 # ======================
 # Data (large files)
 # ======================
-data/
+data/*
+!data/.gitkeep
 
 
 # ===========================
