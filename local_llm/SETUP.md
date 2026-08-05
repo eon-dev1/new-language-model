@@ -1,13 +1,13 @@
 # Local LLM Setup (llama.cpp)
 
-NLM supports any local server that implements the Anthropic Messages API. These instructions use the project's llama.cpp fork.
+NLM supports any local server that implements the Anthropic Messages API.
 
 ---
 
 ## 1. Clone
 
 ```bash
-git clone https://github.com/eon-dev1/llama.cpp.git
+git clone https://github.com/ggml-org/llama.cpp.git
 cd llama.cpp
 mkdir build && cd build
 ```
