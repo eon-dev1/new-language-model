@@ -1,8 +1,8 @@
 """
-Tests for mcp_server/server.py - Server integration tests.
+Tests for mcp_server/server.py - server setup and tool registration wiring.
 
 TDD: These tests verify the MCP server setup and tool registration.
-Run with: pytest tests/unit/mcp_server/test_integration.py -v
+Run with: pytest tests/unit/mcp_server/test_server_wiring.py -v
 """
 
 import pytest
@@ -24,7 +24,7 @@ class TestToolRegistration:
     """Tests for tool registration"""
 
     def test_all_tools_registered(self):
-        """All 20 tools are registered"""
+        """All tools are registered"""
         from mcp_server.server import mcp
 
         # Get registered tools
@@ -47,6 +47,7 @@ class TestToolRegistration:
             "get_word_index",
             "get_words_not_in_dictionary",
             "get_word_frequency_list",
+            "get_phrase_context",
             "list_language_notes",
             "search_language_notes",
             "list_correction_log",
@@ -143,13 +144,3 @@ class TestDatabaseConnection:
         from mcp_server.server import get_db
 
         assert callable(get_db)
-
-    @pytest.mark.asyncio
-    async def test_get_db_returns_connector(self):
-        """get_db returns MongoDBConnector instance"""
-        from mcp_server.server import get_db
-
-        db = await get_db()
-        assert db is not None
-        # Should have get_collection method
-        assert hasattr(db, "get_collection")

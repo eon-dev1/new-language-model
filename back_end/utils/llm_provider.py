@@ -60,7 +60,7 @@ class AnthropicProvider(LLMProvider):
     """
 
     def __init__(self, api_key: str, model: str, base_url: str | None = None,
-                 provider_type: Literal["anthropic", "local", "openrouter"] = "anthropic"):
+                 provider_type: Literal["local", "openrouter"] = "openrouter"):
         kwargs: dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
@@ -120,6 +120,10 @@ class AnthropicProvider(LLMProvider):
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": THINKING_BUDGET_TOKENS}
             kwargs["betas"] = [THINKING_BETA_HEADER]
             kwargs["max_tokens"] = max(max_tokens, THINKING_MAX_TOKENS)
+            if self.provider_type == "openrouter":
+                # OpenRouter requires the beta header as an explicit HTTP header;
+                # the SDK's `betas=` parameter alone is not forwarded to Anthropic.
+                kwargs["extra_headers"] = {"x-anthropic-beta": THINKING_BETA_HEADER}
 
         if self.provider_type != "local" and not self.model.startswith("qwen/"):
             self._apply_prompt_caching(kwargs)
@@ -194,19 +198,31 @@ class AnthropicProvider(LLMProvider):
                 logger.error(f"[openrouter] Cannot connect: {e}")
             else:
                 logger.error(f"Cannot connect to LLM: {e}")
-            yield {"type": "error", "content": f"Cannot connect to LLM server. Is it running? ({e})"}
+            yield {"type": "error", "content": "Cannot connect to LLM server. Is it running?"}
         except anthropic.APIError as e:
             if self.provider_type == "openrouter":
                 logger.error(f"[openrouter] API error model={self.model}: {e}")
             else:
                 logger.error(f"LLM API error: {e}")
             yield {"type": "error", "content": f"LLM API error: {e.message}"}
-        except Exception as e:
+        except Exception:
             if self.provider_type == "openrouter":
-                logger.error(f"[openrouter] Unexpected error model={self.model}: {e}")
+                logger.exception(f"[openrouter] Unexpected error model={self.model}")
             else:
-                logger.error(f"Unexpected error in LLM provider: {e}")
-            yield {"type": "error", "content": str(e)}
+                logger.exception("Unexpected error in LLM provider")
+            yield {"type": "error", "content": "Server error"}
+
+
+class ProviderConfigError(ValueError):
+    """Raised by get_provider() for user-actionable LLM configuration problems.
+
+    A distinct type so route handlers can surface these messages to the user
+    verbatim without also catching unrelated ValueErrors. Notably, pydantic's
+    ValidationError is a ValueError subclass, and MongoDBSettings validation
+    failures stringify the rejected connection URI — username in full, password
+    at least in part.
+    Subclasses ValueError so existing callers and tests keep working.
+    """
 
 
 def get_provider() -> LLMProvider:
@@ -217,22 +233,18 @@ def get_provider() -> LLMProvider:
     just with different base_url and api_key settings.
 
     Raises:
-        ValueError: If config is invalid (e.g., no API key for Anthropic).
+        ProviderConfigError: If config is invalid (e.g., no API key configured).
+            A ValueError subclass, deliberately distinct so callers can surface
+            these messages verbatim without also catching unrelated ValueErrors —
+            notably pydantic ValidationError, which stringifies rejected input.
     """
     config = load_config()
-    provider_type = config.get("llm_provider", "anthropic")
+    provider_type = config.get("llm_provider", "openrouter")
 
-    if provider_type == "anthropic":
-        api_key = config.get("anthropic_api_key", "")
-        if not api_key:
-            raise ValueError("Anthropic API key not configured. Set it in Chat Settings.")
-        model = config.get("anthropic_model", "claude-sonnet-4-6")
-        return AnthropicProvider(api_key=api_key, model=model, provider_type="anthropic")
-
-    elif provider_type == "openrouter":
+    if provider_type == "openrouter":
         api_key = config.get("openrouter_api_key", "")
         if not api_key:
-            raise ValueError("OpenRouter API key not configured. Set it in Chat Settings.")
+            raise ProviderConfigError("OpenRouter API key not configured. Set it in Chat Settings.")
         model = config.get("openrouter_model", "anthropic/claude-sonnet-4.6")
 
         if get_api_format(model) == "openai":
@@ -252,4 +264,4 @@ def get_provider() -> LLMProvider:
         return AnthropicProvider(api_key="local", model=model, base_url=base_url, provider_type="local")
 
     else:
-        raise ValueError(f"Unknown LLM provider: {provider_type}")
+        raise ProviderConfigError(f"Unknown LLM provider: {provider_type}")

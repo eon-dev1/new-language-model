@@ -10,7 +10,7 @@ Provides endpoints to:
 from fastapi import APIRouter, HTTPException, Path, Body, Depends, Query
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 from bson.errors import InvalidId
 import logging
@@ -90,7 +90,7 @@ async def append_correction_log(
         database = db.get_database()
         collection = database[Collection.CORRECTION_LOG]
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         doc = {
             "language_code": language_code,
             "content_type": request.content_type,

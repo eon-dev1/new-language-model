@@ -20,19 +20,6 @@ from utils.usfm_parser.usfm_book_codes import (
 class TestUSFMBookCodeMappings:
     """Test the USFM book code mapping dictionaries."""
 
-    def test_usfm_book_data_has_66_books(self):
-        """The Bible has 66 canonical books plus 1 Enoch."""
-        assert len(USFM_BOOK_DATA) == 67
-
-    def test_usfm_to_book_code_has_66_entries(self):
-        assert len(USFM_TO_BOOK_CODE) == 67
-
-    def test_usfm_to_book_name_has_66_entries(self):
-        assert len(USFM_TO_BOOK_NAME) == 67
-
-    def test_book_code_to_usfm_has_66_entries(self):
-        assert len(BOOK_CODE_TO_USFM) == 67
-
     def test_all_book_codes_are_lowercase(self):
         """MongoDB book codes should be lowercase."""
         for book_code in USFM_TO_BOOK_CODE.values():

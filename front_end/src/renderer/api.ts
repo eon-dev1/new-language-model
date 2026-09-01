@@ -11,12 +11,30 @@
 const API_BASE_URL = 'http://127.0.0.1:8221/api';
 
 /**
+ * Thrown by makeRequest on any non-2xx response. Carries the parsed JSON body
+ * intact (structured or string `detail`) so callers can discriminate on it,
+ * rather than collapsing it into a stringified message.
+ */
+export class ApiError extends Error {
+  status: number;
+  body: unknown;
+
+  constructor(status: number, body: unknown, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
+/**
  * Makes a request to the API with error handling.
  *
  * @param {string} endpoint - The API endpoint (relative to base URL)
  * @param {RequestInit} options - Fetch options (method, body, etc.)
  * @returns {Promise<Response>} The fetch response
- * @throws {Error} If the request fails
+ * @throws {ApiError} If the response status is not ok
+ * @throws {Error} If the request itself fails (network, invalid endpoint, etc.)
  */
 async function makeRequest(endpoint: string, options: RequestInit = {}): Promise<Response> {
   try {
@@ -38,10 +56,15 @@ async function makeRequest(endpoint: string, options: RequestInit = {}): Promise
     const response = await fetch(fullUrl, requestOptions);
 
     if (!response.ok) {
-      let detail = `${response.status} - ${response.statusText}`;
-      try { const body = await response.json(); if (body?.detail) detail = body.detail; } catch {}
-      console.error(`[API] Request failed: ${detail}`);
-      throw new Error(`HTTP error! ${detail}`);
+      let body: unknown = null;
+      try { body = await response.json(); } catch {}
+      const detail = (body as { detail?: unknown } | null)?.detail;
+      // Only interpolate `detail` into the message when it's a string — an
+      // object-shaped detail (e.g. a 409 conflict body) stays on `.body`,
+      // where it survives intact instead of collapsing to "[object Object]".
+      const message = typeof detail === 'string' ? detail : `${response.status} - ${response.statusText}`;
+      console.error(`[API] Request failed: ${message}`);
+      throw new ApiError(response.status, body, `HTTP error! ${message}`);
     }
 
     console.debug(`[API] Request successful: ${endpoint}`);
@@ -53,27 +76,11 @@ async function makeRequest(endpoint: string, options: RequestInit = {}): Promise
   }
 }
 
-/**
- * Test API connectivity.
- *
- * @returns {Promise<boolean>} True if connection is successful
- */
-export async function testApiConnection(): Promise<boolean> {
-  try {
-    console.info('[API] Testing connection...');
-    await makeRequest('/check-connection');
-    console.info('[API] Connection test successful');
-    return true;
-  } catch (error) {
-    console.warn('[API] Connection test failed:', error);
-    return false;
-  }
-}
 
 /**
  * Verification progress breakdown by testament.
  */
-export interface VerificationProgress {
+interface VerificationProgress {
   old_testament: number;  // 0-100 percentage
   new_testament: number;  // 0-100 percentage
   total: number;          // 0-100 percentage
@@ -145,7 +152,7 @@ export const selectFolder = (): Promise<string | null> => {
 /**
  * Import Bible request payload.
  */
-export interface ImportBibleRequest {
+interface ImportBibleRequest {
   language_code: string;
   language_name: string;
   usfm_directory: string;
@@ -155,7 +162,7 @@ export interface ImportBibleRequest {
 /**
  * Import Bible response from backend.
  */
-export interface ImportBibleResponse {
+interface ImportBibleResponse {
   success: boolean;
   language_code: string;
   message: string;
@@ -190,44 +197,9 @@ export async function importBible(request: ImportBibleRequest): Promise<ImportBi
   }
 }
 
-/**
- * Import HTML Bible request payload.
- */
-export interface ImportHtmlBibleRequest {
-  language_code: string;
-  language_name: string;
-  html_directory: string;
-  human_verified?: boolean;
-}
-
-/**
- * Import HTML Bible files from a directory.
- *
- * @param request - Import configuration
- * @returns Import result with verse counts and status
- * @throws Error if import fails
- */
-export async function importHtmlBible(request: ImportHtmlBibleRequest): Promise<ImportBibleResponse> {
-  try {
-    console.info('[API] Starting HTML Bible import...');
-    const response = await makeRequest('/import-html-bible', {
-      method: 'POST',
-      body: JSON.stringify(request)
-    });
-
-    const data = await response.json();
-    console.info(`[API] HTML Import complete: ${data.message}`);
-    return data as ImportBibleResponse;
-
-  } catch (error) {
-    console.error('[API] HTML Bible import failed:', error);
-    throw new Error(`HTML Bible import failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-}
-
 // ── Base Language ─────────────────────────────────────────────────────────────
 
-export interface EnsureBaseLanguageResponse {
+interface EnsureBaseLanguageResponse {
   success: boolean;
   already_loaded: boolean;
   language_code: string;
@@ -279,7 +251,7 @@ export interface VerseData {
 /**
  * Response containing all verses for a chapter.
  */
-export interface ChapterResponse {
+interface ChapterResponse {
   language_code: string;
   book_code: string;
   chapter: number;
@@ -306,7 +278,7 @@ export interface BibleBookInfo {
 /**
  * Response from /api/bible-books endpoint.
  */
-export interface BibleBooksResponse {
+interface BibleBooksResponse {
   language: string;
   books: BibleBookInfo[];
   count: number;
@@ -500,13 +472,11 @@ export interface MergedDictionaryEntry {
   updated_at?: string;
 }
 
-/** Alias for backward compatibility within this file. */
-export type DictionaryEntryVersion = MergedDictionaryEntry;
 
 /**
  * Response from /api/dictionary/{language}/entries endpoint.
  */
-export interface DictionaryEntriesResponse {
+interface DictionaryEntriesResponse {
   language_code: string;
   entries: MergedDictionaryEntry[];
   count: number;
@@ -515,11 +485,12 @@ export interface DictionaryEntriesResponse {
 /**
  * Request to create or update a dictionary entry.
  */
-export interface SaveDictionaryEntryRequest {
+interface SaveDictionaryEntryRequest {
   word: string;
   definition: string;
   part_of_speech?: string;
   examples?: string[];
+  original_word?: string;
 }
 
 /**
@@ -552,19 +523,18 @@ export async function saveDictionaryEntry(
   languageCode: string,
   entry: SaveDictionaryEntryRequest
 ): Promise<{ success: boolean; word: string; action: string }> {
-  try {
-    console.info(`[API] Saving dictionary entry '${entry.word}' for ${languageCode}...`);
-    const response = await makeRequest(`/dictionary/${languageCode}/entries`, {
-      method: 'POST',
-      body: JSON.stringify(entry)
-    });
-    const data = await response.json();
-    console.info(`[API] Dictionary entry ${data.action}: ${entry.word}`);
-    return data;
-  } catch (error) {
-    console.error('[API] Failed to save dictionary entry:', error);
-    throw new Error(`Failed to save dictionary entry: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
+  // Deliberately no try/catch here: a non-2xx response throws ApiError (with
+  // .status/.body intact) from makeRequest, and callers need that structure
+  // to discriminate a 409 conflict from other failures. Rewrapping it in a
+  // plain Error would strip .status/.body and silently break that.
+  console.info(`[API] Saving dictionary entry '${entry.word}' for ${languageCode}...`);
+  const response = await makeRequest(`/dictionary/${languageCode}/entries`, {
+    method: 'POST',
+    body: JSON.stringify(entry)
+  });
+  const data = await response.json();
+  console.info(`[API] Dictionary entry ${data.action}: ${entry.word}`);
+  return data;
 }
 
 /**
@@ -575,6 +545,33 @@ export async function saveDictionaryEntry(
  * @param translationType - Which version to verify ('human' or 'ai')
  * @param humanVerified - New verification status
  */
+interface DeleteDictionaryEntriesResponse {
+  success: boolean;
+  language_code: string;
+  absent: string[];
+}
+
+/**
+ * Delete one or more dictionary entries by word (hard delete, no undo).
+ *
+ * @param languageCode - The language code
+ * @param words - Words to delete (single or bulk, via the same endpoint)
+ * @returns `absent` — every requested word, normalized, confirmed no longer in the dictionary
+ */
+export async function deleteDictionaryEntries(
+  languageCode: string,
+  words: string[]
+): Promise<DeleteDictionaryEntriesResponse> {
+  // Deliberately no try/catch here — same reasoning as saveDictionaryEntry: a
+  // non-2xx response must propagate as ApiError (with .status/.body intact)
+  // so the caller can show the real server-provided error and let the user retry.
+  const response = await makeRequest(`/dictionary/${languageCode}/entries/delete`, {
+    method: 'POST',
+    body: JSON.stringify({ words })
+  });
+  return response.json();
+}
+
 export async function verifyDictionaryEntry(
   languageCode: string,
   word: string,
@@ -656,7 +653,7 @@ export type GrammarCategoryVersion = MergedGrammarCategory;
 /**
  * Response from /api/grammar/{language}/categories endpoint.
  */
-export interface GrammarCategoriesResponse {
+interface GrammarCategoriesResponse {
   language_code: string;
   categories: MergedGrammarCategory[];
   count: number;
@@ -666,7 +663,7 @@ export interface GrammarCategoriesResponse {
  * Request to update grammar category content.
  * Write path accepts rich format only.
  */
-export interface SaveGrammarCategoryRequest {
+interface SaveGrammarCategoryRequest {
   notes: NoteData[];  // Rich only with verification
   subcategories: SubcategoryData[];  // Rich only
   examples: ExampleData[];           // Rich only
@@ -869,7 +866,7 @@ export interface ChatStreamEvent {
 /**
  * Chat context describing what the user is currently viewing.
  */
-export interface ChatRequestContext {
+interface ChatRequestContext {
   language_code?: string;
   book_code?: string;
   chapter?: number;
@@ -1020,7 +1017,7 @@ export interface ConversationSummary {
   message_count: number;
 }
 
-export interface ConversationMessage {
+interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
   tool_calls?: string[];
@@ -1028,7 +1025,7 @@ export interface ConversationMessage {
   timestamp: string;
 }
 
-export interface ConversationDetail {
+interface ConversationDetail {
   id: string;
   title: string;
   messages: ConversationMessage[];
@@ -1058,12 +1055,6 @@ export async function deleteConversation(id: string): Promise<void> {
   await makeRequest(`/chat/conversations/${id}`, { method: 'DELETE' });
 }
 
-export async function updateConversationTitle(id: string, title: string): Promise<void> {
-  await makeRequest(`/chat/conversations/${id}/title`, {
-    method: 'PATCH',
-    body: JSON.stringify({ title }),
-  });
-}
 
 // ============================================================================
 // Word Index API
@@ -1086,12 +1077,12 @@ export async function rebuildWordIndex(languageCode: string): Promise<{
 // Export USFM API
 // ============================================================================
 
-export interface ExportUsfmRequest {
+interface ExportUsfmRequest {
   language_code: string;
   output_dir: string;
 }
 
-export interface ExportUsfmResponse {
+interface ExportUsfmResponse {
   success: boolean;
   files_written: number;
   message: string;
@@ -1111,9 +1102,6 @@ export async function exportUsfm(request: ExportUsfmRequest): Promise<ExportUsfm
 
 export interface ChatConfig {
   llm_provider: string;
-  anthropic_model: string;
-  has_api_key: boolean;
-  api_key_preview: string;
   local_base_url: string;
   local_model: string;
   has_openrouter_key: boolean;
@@ -1326,20 +1314,21 @@ export async function* streamBatchResume(
  */
 export interface LanguageNote {
   id: string;
+  title: string;
   text: string;
   created_at: string;
   updated_at: string;
 }
 
 /** Response from GET /api/memories/{language}/notes */
-export interface LanguageNotesResponse {
+interface LanguageNotesResponse {
   language_code: string;
   notes: LanguageNote[];
   count: number;
 }
 
 /** Response from note mutation endpoints (POST/PUT/DELETE) */
-export interface NoteActionResponse {
+interface NoteActionResponse {
   success: boolean;
   note_id: string;
   language_code: string;
@@ -1350,10 +1339,14 @@ export async function fetchNotes(languageCode: string): Promise<LanguageNotesRes
   return response.json();
 }
 
-export async function addNote(languageCode: string, text: string): Promise<NoteActionResponse> {
+export async function addNote(
+  languageCode: string,
+  title: string,
+  text: string,
+): Promise<NoteActionResponse> {
   const response = await makeRequest(`/memories/${languageCode}/notes`, {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ title, text }),
   });
   return response.json();
 }
@@ -1361,11 +1354,12 @@ export async function addNote(languageCode: string, text: string): Promise<NoteA
 export async function updateNote(
   languageCode: string,
   noteId: string,
-  text: string
+  title: string,
+  text: string,
 ): Promise<NoteActionResponse> {
   const response = await makeRequest(`/memories/${languageCode}/notes/${noteId}`, {
     method: 'PUT',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ title, text }),
   });
   return response.json();
 }
@@ -1415,7 +1409,7 @@ export interface PerEntryCorrection {
 }
 
 /** Response from GET /api/correction-log/{language} */
-export interface CorrectionLogResponse {
+interface CorrectionLogResponse {
   language_code: string;
   entries: CorrectionLogEntry[];
   total: number;
@@ -1463,7 +1457,7 @@ export async function updateCorrectionLog(
 // Database Backup API
 // ============================================================================
 
-export interface BackupDatabaseResponse {
+interface BackupDatabaseResponse {
   success: boolean;
   backup_dir: string;
   message: string;

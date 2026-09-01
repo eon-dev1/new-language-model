@@ -3,7 +3,7 @@
 Pytest fixtures for MongoDB db_connector unit tests (no live DB required).
 
 Fixture Dependency Graph:
-    mongodb_settings (sync, reads ~/.nlm/mongodb_credentials.env)
+    mongodb_settings (sync, synthetic — no credential file)
            ↓
     connector (async, unconnected)
 """
@@ -17,14 +17,13 @@ from db_connector.connection import MongoDBConnector
 
 # === SETTINGS FIXTURES ===
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def mongodb_settings():
-    """
-    Load MongoDB settings from ~/.nlm/mongodb_credentials.env.
-
-    Module-scoped to avoid repeated credential file reads.
-    """
-    return MongoDBSettings.create_from_credentials()
+    """Synthetic settings for unit tests — no credential file needed."""
+    return MongoDBSettings(
+        mongodb_connection_string="mongodb://localhost:27019",
+        database_name="test_unit",
+    )
 
 
 # === CONNECTOR FIXTURES ===

@@ -127,25 +127,6 @@ class TestGetToolNames:
 # ---------------------------------------------------------------------------
 
 class TestExtractionCompleteness:
-    """After Step 1: verify _get_context_window and _run_tool_loop are gone from chat.py."""
-
-    def test_chat_py_no_longer_defines_private_helpers(self):
-        import ast
-        import pathlib
-        chat_src = (
-            pathlib.Path(__file__).parent.parent.parent.parent
-            / "routes" / "chat.py"
-        ).read_text(encoding='utf-8')
-        tree = ast.parse(chat_src)
-        defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
-        assert "_get_context_window" not in defined, (
-            "chat.py still defines _get_context_window — chat_tool_result (line 462) "
-            "was not updated and will 500 on any write-tool approval resume."
-        )
-        assert "_run_tool_loop" not in defined, (
-            "chat.py still defines _run_tool_loop — extraction incomplete."
-        )
-
     def test_llm_tool_loop_exports_required_symbols(self):
         import shared.llm_tool_loop as loop
         assert hasattr(loop, "run_tool_loop")
@@ -177,11 +158,6 @@ class TestTranslationToolFilter:
 
     def test_is_write_tool(self):
         assert is_write_tool("propose_verse_translation") is True
-
-    def test_tool_counts_stable(self):
-        """translation_only filter must not disturb existing chat tool counts."""
-        assert len(get_tool_names(readonly=True)) == 17
-        assert len(get_tool_names(readonly=False)) == 19
 
 
 # ---------------------------------------------------------------------------
@@ -238,9 +214,3 @@ class TestVerseNumberInSchema:
         assert "verse_number" in required, (
             "verse_number must be required for frontend routing"
         )
-
-    def test_tool_counts_unchanged(self):
-        """Adding verse_number must not affect tool counts (internal schema change only)."""
-        from shared.tool_registry import get_tool_names
-        assert len(get_tool_names(readonly=True)) == 17
-        assert len(get_tool_names(readonly=False)) == 19

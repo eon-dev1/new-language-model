@@ -147,7 +147,11 @@ async def search_language_notes(
     # Step 4: Filter (empty search_term → return all, same as list)
     if search_term:
         search_lower = search_term.lower()
-        matches = [n for n in notes if search_lower in n.get("text", "").lower()]
+        matches = [
+            n for n in notes
+            if search_lower in n.get("text", "").lower()
+            or search_lower in n.get("title", "").lower()
+        ]
     else:
         matches = list(notes)
 

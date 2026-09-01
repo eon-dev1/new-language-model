@@ -6,14 +6,17 @@ Verifies:
 - GET returns empty array (not 404) when no notes document exists
 - POST creates a note; it appears in GET with the correct id
 - Created notes have no human_verified field
-- PUT updates text and updated_at; PUT with unknown id → 404
+- PUT updates title/text and updated_at; PUT with unknown id → 404
 - DELETE removes the note; DELETE with unknown id → 404
+- Title/text validators strip whitespace and reject empty-after-strip
+- GET against a manually-seeded title-less note returns 500 (loud-failure)
 """
 
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 from typing import AsyncGenerator
+from datetime import datetime, timezone
 import uuid
 
 from constants import Collection
@@ -32,9 +35,13 @@ async def clean_notes_language(connected_db) -> AsyncGenerator[str, None]:
 
 # === Helper ===
 
-async def _create_note(client: AsyncClient, lang: str, text: str) -> str:
+async def _create_note(
+    client: AsyncClient, lang: str, title: str, text: str
+) -> str:
     """POST a note and return the note_id."""
-    resp = await client.post(f"/api/memories/{lang}/notes", json={"text": text})
+    resp = await client.post(
+        f"/api/memories/{lang}/notes", json={"title": title, "text": text}
+    )
     assert resp.status_code == 200, f"Setup POST failed: {resp.text}"
     return resp.json()["note_id"]
 
@@ -57,14 +64,6 @@ class TestNotesEmptyState:
         assert data["notes"] == []
         assert data["count"] == 0
 
-    @pytest.mark.asyncio
-    async def test_get_notes_not_404_for_new_language(
-        self, async_client: AsyncClient, clean_notes_language: str
-    ):
-        """Explicitly confirm the response is not 404."""
-        resp = await async_client.get(f"/api/memories/{clean_notes_language}/notes")
-        assert resp.status_code != 404, "GET should never return 404 for missing notes"
-
 
 class TestNotesCreate:
     """POST /api/memories/{language}/notes."""
@@ -76,7 +75,7 @@ class TestNotesCreate:
         """POST should return success=True and a note_id."""
         resp = await async_client.post(
             f"/api/memories/{clean_notes_language}/notes",
-            json={"text": "A useful language note"}
+            json={"title": "Vowel rule", "text": "A useful language note"}
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -89,7 +88,10 @@ class TestNotesCreate:
         self, async_client: AsyncClient, clean_notes_language: str
     ):
         """Created note should appear in GET response."""
-        note_id = await _create_note(async_client, clean_notes_language, "Vowels are long in open syllables")
+        note_id = await _create_note(
+            async_client, clean_notes_language,
+            "Vowel length", "Vowels are long in open syllables",
+        )
 
         resp = await async_client.get(f"/api/memories/{clean_notes_language}/notes")
         assert resp.status_code == 200
@@ -97,6 +99,7 @@ class TestNotesCreate:
         assert data["count"] == 1
         assert len(data["notes"]) == 1
         assert data["notes"][0]["id"] == note_id
+        assert data["notes"][0]["title"] == "Vowel length"
         assert data["notes"][0]["text"] == "Vowels are long in open syllables"
 
     @pytest.mark.asyncio
@@ -104,7 +107,7 @@ class TestNotesCreate:
         self, async_client: AsyncClient, clean_notes_language: str
     ):
         """Notes must NOT contain a human_verified field — presence implies trust."""
-        await _create_note(async_client, clean_notes_language, "Test note")
+        await _create_note(async_client, clean_notes_language, "Title", "Test note")
 
         resp = await async_client.get(f"/api/memories/{clean_notes_language}/notes")
         note = resp.json()["notes"][0]
@@ -115,7 +118,9 @@ class TestNotesCreate:
         self, async_client: AsyncClient, clean_notes_language: str
     ):
         """Created note should have created_at and updated_at timestamps."""
-        await _create_note(async_client, clean_notes_language, "Timestamped note")
+        await _create_note(
+            async_client, clean_notes_language, "T", "Timestamped note"
+        )
 
         resp = await async_client.get(f"/api/memories/{clean_notes_language}/notes")
         note = resp.json()["notes"][0]
@@ -127,9 +132,9 @@ class TestNotesCreate:
         self, async_client: AsyncClient, clean_notes_language: str
     ):
         """Multiple POST calls should accumulate notes."""
-        await _create_note(async_client, clean_notes_language, "Note one")
-        await _create_note(async_client, clean_notes_language, "Note two")
-        await _create_note(async_client, clean_notes_language, "Note three")
+        await _create_note(async_client, clean_notes_language, "T1", "Note one")
+        await _create_note(async_client, clean_notes_language, "T2", "Note two")
+        await _create_note(async_client, clean_notes_language, "T3", "Note three")
 
         resp = await async_client.get(f"/api/memories/{clean_notes_language}/notes")
         data = resp.json()
@@ -144,21 +149,24 @@ class TestNotesUpdate:
     """PUT /api/memories/{language}/notes/{note_id}."""
 
     @pytest.mark.asyncio
-    async def test_put_note_updates_text(
+    async def test_put_note_updates_title_and_text(
         self, async_client: AsyncClient, clean_notes_language: str
     ):
-        """PUT should update the note text."""
-        note_id = await _create_note(async_client, clean_notes_language, "Original text")
+        """PUT should update both title and text."""
+        note_id = await _create_note(
+            async_client, clean_notes_language, "Old title", "Original text"
+        )
 
         resp = await async_client.put(
             f"/api/memories/{clean_notes_language}/notes/{note_id}",
-            json={"text": "Updated text"}
+            json={"title": "New title", "text": "Updated text"}
         )
         assert resp.status_code == 200
         assert resp.json()["success"] is True
 
         get = await async_client.get(f"/api/memories/{clean_notes_language}/notes")
         note = next(n for n in get.json()["notes"] if n["id"] == note_id)
+        assert note["title"] == "New title"
         assert note["text"] == "Updated text"
 
     @pytest.mark.asyncio
@@ -166,24 +174,25 @@ class TestNotesUpdate:
         self, async_client: AsyncClient, clean_notes_language: str
     ):
         """PUT should change updated_at timestamp."""
-        note_id = await _create_note(async_client, clean_notes_language, "Before update")
+        note_id = await _create_note(
+            async_client, clean_notes_language, "T", "Before update"
+        )
 
         get_before = await async_client.get(f"/api/memories/{clean_notes_language}/notes")
         updated_at_before = next(n for n in get_before.json()["notes"] if n["id"] == note_id)["updated_at"]
 
-        # Small delay so timestamps differ
         import asyncio
         await asyncio.sleep(0.01)
 
         await async_client.put(
             f"/api/memories/{clean_notes_language}/notes/{note_id}",
-            json={"text": "After update"}
+            json={"title": "T", "text": "After update"}
         )
 
         get_after = await async_client.get(f"/api/memories/{clean_notes_language}/notes")
         updated_at_after = next(n for n in get_after.json()["notes"] if n["id"] == note_id)["updated_at"]
 
-        assert updated_at_after >= updated_at_before
+        assert updated_at_after > updated_at_before
 
     @pytest.mark.asyncio
     async def test_put_nonexistent_note_returns_404(
@@ -193,7 +202,7 @@ class TestNotesUpdate:
         fake_id = str(uuid.uuid4())
         resp = await async_client.put(
             f"/api/memories/{clean_notes_language}/notes/{fake_id}",
-            json={"text": "Should not work"}
+            json={"title": "T", "text": "Should not work"}
         )
         assert resp.status_code == 404
 
@@ -206,7 +215,9 @@ class TestNotesDelete:
         self, async_client: AsyncClient, clean_notes_language: str
     ):
         """DELETE should remove the note from GET results."""
-        note_id = await _create_note(async_client, clean_notes_language, "To be deleted")
+        note_id = await _create_note(
+            async_client, clean_notes_language, "T", "To be deleted"
+        )
 
         resp = await async_client.delete(
             f"/api/memories/{clean_notes_language}/notes/{note_id}"
@@ -223,8 +234,10 @@ class TestNotesDelete:
         self, async_client: AsyncClient, clean_notes_language: str
     ):
         """Count should decrease by 1 after delete."""
-        await _create_note(async_client, clean_notes_language, "Keep this")
-        note_id = await _create_note(async_client, clean_notes_language, "Delete this")
+        await _create_note(async_client, clean_notes_language, "Keep", "Keep this")
+        note_id = await _create_note(
+            async_client, clean_notes_language, "Del", "Delete this"
+        )
 
         await async_client.delete(f"/api/memories/{clean_notes_language}/notes/{note_id}")
 
@@ -252,10 +265,21 @@ class TestNotesValidation:
     async def test_post_empty_text_returns_422(
         self, async_client: AsyncClient, clean_notes_language: str
     ):
-        """POST with empty text violates min_length=1 → 422."""
+        """POST with empty text → 422."""
         resp = await async_client.post(
             f"/api/memories/{clean_notes_language}/notes",
-            json={"text": ""}
+            json={"title": "T", "text": ""}
+        )
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
+
+    @pytest.mark.asyncio
+    async def test_post_empty_title_returns_422(
+        self, async_client: AsyncClient, clean_notes_language: str
+    ):
+        """POST with empty title → 422."""
+        resp = await async_client.post(
+            f"/api/memories/{clean_notes_language}/notes",
+            json={"title": "", "text": "Body"}
         )
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 
@@ -263,39 +287,131 @@ class TestNotesValidation:
     async def test_post_missing_text_returns_422(
         self, async_client: AsyncClient, clean_notes_language: str
     ):
-        """POST without text field → 422 (required field)."""
+        """POST without text field → 422."""
         resp = await async_client.post(
             f"/api/memories/{clean_notes_language}/notes",
-            json={}
+            json={"title": "T"}
         )
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
-    async def test_post_whitespace_only_text_accepted(
+    async def test_post_missing_title_returns_422(
         self, async_client: AsyncClient, clean_notes_language: str
     ):
-        """POST with whitespace-only text should be accepted; stored text must not be stripped."""
+        """POST without title field → 422."""
         resp = await async_client.post(
             f"/api/memories/{clean_notes_language}/notes",
-            json={"text": "   "}
+            json={"text": "Body"}
+        )
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
+
+    @pytest.mark.asyncio
+    async def test_post_whitespace_only_text_returns_422(
+        self, async_client: AsyncClient, clean_notes_language: str
+    ):
+        """POST with whitespace-only text → 422 (validator strips first then checks)."""
+        resp = await async_client.post(
+            f"/api/memories/{clean_notes_language}/notes",
+            json={"title": "T", "text": "   "}
+        )
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
+
+    @pytest.mark.asyncio
+    async def test_post_whitespace_only_title_returns_422(
+        self, async_client: AsyncClient, clean_notes_language: str
+    ):
+        """POST with whitespace-only title → 422 (validator strips first then checks)."""
+        resp = await async_client.post(
+            f"/api/memories/{clean_notes_language}/notes",
+            json={"title": "   ", "text": "Body"}
+        )
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
+
+    @pytest.mark.asyncio
+    async def test_post_strips_surrounding_whitespace(
+        self, async_client: AsyncClient, clean_notes_language: str
+    ):
+        """POST with surrounding whitespace → 200, stored values are stripped."""
+        resp = await async_client.post(
+            f"/api/memories/{clean_notes_language}/notes",
+            json={"title": "  Padded title  ", "text": "  Padded body  "}
         )
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         note_id = resp.json()["note_id"]
 
-        # Verify stored text is exactly "   " (not stripped)
         get = await async_client.get(f"/api/memories/{clean_notes_language}/notes")
         note = next(n for n in get.json()["notes"] if n["id"] == note_id)
-        assert note["text"] == "   ", f"Expected text to be exactly '   ', got {repr(note['text'])}"
+        assert note["title"] == "Padded title"
+        assert note["text"] == "Padded body"
+
+    @pytest.mark.asyncio
+    async def test_post_title_too_long_returns_422(
+        self, async_client: AsyncClient, clean_notes_language: str
+    ):
+        """POST with title > 200 chars → 422."""
+        resp = await async_client.post(
+            f"/api/memories/{clean_notes_language}/notes",
+            json={"title": "x" * 201, "text": "Body"}
+        )
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 
     @pytest.mark.asyncio
     async def test_put_empty_text_returns_422(
         self, async_client: AsyncClient, clean_notes_language: str
     ):
-        """PUT with empty text violates min_length=1 → 422."""
-        note_id = await _create_note(async_client, clean_notes_language, "Original text")
+        """PUT with empty text → 422."""
+        note_id = await _create_note(
+            async_client, clean_notes_language, "T", "Original text"
+        )
 
         resp = await async_client.put(
             f"/api/memories/{clean_notes_language}/notes/{note_id}",
-            json={"text": ""}
+            json={"title": "T", "text": ""}
         )
         assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
+
+    @pytest.mark.asyncio
+    async def test_put_whitespace_only_title_returns_422(
+        self, async_client: AsyncClient, clean_notes_language: str
+    ):
+        """PUT with whitespace-only title → 422."""
+        note_id = await _create_note(
+            async_client, clean_notes_language, "T", "Body"
+        )
+
+        resp = await async_client.put(
+            f"/api/memories/{clean_notes_language}/notes/{note_id}",
+            json={"title": "   ", "text": "Body"}
+        )
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
+
+
+class TestNotesReadLoudFailure:
+    """A title-less note in storage must surface as 500 on read (I6/P10)."""
+
+    @pytest.mark.asyncio
+    async def test_get_titleless_note_returns_500(
+        self, async_client: AsyncClient, connected_db, clean_notes_language: str
+    ):
+        """Manually seed a note missing `title`; GET must return 500 (Pydantic ValidationError)."""
+        db = connected_db.get_database()
+        collection = db[Collection.LANGUAGE_NOTES]
+        now = datetime.now(timezone.utc)
+        await collection.insert_one({
+            "language_code": clean_notes_language,
+            "notes": [
+                {
+                    "id": str(uuid.uuid4()),
+                    # NB: no title field — simulates a pre-migration legacy doc
+                    "text": "Legacy note without title",
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            ],
+            "updated_at": now,
+        })
+
+        resp = await async_client.get(f"/api/memories/{clean_notes_language}/notes")
+        assert resp.status_code == 500, (
+            f"Expected 500 (loud-failure on missing title); got {resp.status_code}: {resp.text}"
+        )

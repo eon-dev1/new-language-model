@@ -10,7 +10,7 @@ base languages (Hebrew, Greek) slot in by adding constants and a branch.
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from db_connector.connection import MongoDBConnector
@@ -19,6 +19,7 @@ from utils.usfm_parser.usfm_importer import (
     sync_bible_books_from_texts
 )
 from utils.word_index.builder import build_word_index
+from utils.phrase_index.builder import build_phrase_index
 from constants import Collection
 from .dependencies import get_db, api_error
 
@@ -141,12 +142,12 @@ async def ensure_base_language(
                         "books_completed": 0,
                         "verses_translated": total_verses,
                         "verses_verified": verses_verified,
-                        "last_updated": datetime.utcnow()
+                        "last_updated": datetime.now(timezone.utc)
                     },
                     "metadata.creator": "bundled_import",
                 },
                 "$setOnInsert": {
-                    "created_at": datetime.utcnow(),
+                    "created_at": datetime.now(timezone.utc),
                     "status": "active",
                 }
             },
@@ -161,8 +162,17 @@ async def ensure_base_language(
             idx = await build_word_index(db, ENGLISH_LANGUAGE_CODE)
             logger.info(f"Word index built: {idx['words_indexed']} words in {idx['duration_ms']}ms")
         except Exception as e:
-            warnings.append(f"Word index build failed: {e}")
+            warnings.append("Word index build failed")
             logger.warning(f"Word index build failed (non-fatal): {e}")
+
+        try:
+            pidx = await build_phrase_index(db, ENGLISH_LANGUAGE_CODE)
+            logger.info(
+                f"Phrase index built: {pidx['phrases_emitted']} phrases in {pidx['duration_ms']}ms"
+            )
+        except Exception as e:
+            warnings.append("Phrase index build failed")
+            logger.warning(f"Phrase index build failed (non-fatal): {e}")
 
         try:
             synced = await sync_bible_books_from_texts(
@@ -170,7 +180,7 @@ async def ensure_base_language(
             )
             logger.info(f"bible_books sync: {synced} books")
         except Exception as e:
-            warnings.append(f"Bible books sync failed: {e}")
+            warnings.append("Bible books sync failed")
             logger.warning(f"Bible books sync failed (non-fatal): {e}")
 
         message = (

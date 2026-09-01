@@ -25,7 +25,12 @@ import {
   List,
   ListItemButton,
   ListItemText,
-  InputAdornment
+  InputAdornment,
+  Checkbox,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import {
   ArrowBack,
@@ -35,14 +40,17 @@ import {
   Cancel,
   CheckCircle,
   CheckCircleOutline,
-  Add
+  Add,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 import { motion } from 'framer-motion';
 import {
   fetchDictionaryEntries,
   saveDictionaryEntry,
   verifyDictionaryEntry,
+  deleteDictionaryEntries,
   appendCorrectionLog,
+  ApiError,
   MergedDictionaryEntry,
 } from '../renderer/api';
 import { useChat } from '../renderer/contexts/ChatContext';
@@ -56,6 +64,27 @@ interface DictionaryViewerProps {
 }
 
 type ViewState = 'list' | 'detail';
+
+interface SaveError {
+  message: string;
+  conflictWord?: string;
+  existingPreview?: { partOfSpeech: string | null; definition: string };
+}
+
+interface ConflictDetail {
+  error: string;
+  word: string;
+  message: string;
+  existing_preview: { part_of_speech: string | null; definition: string };
+}
+
+function asConflictDetail(body: unknown): ConflictDetail | null {
+  const detail = (body as { detail?: unknown } | null)?.detail;
+  if (detail && typeof detail === 'object' && (detail as ConflictDetail).error === 'word_conflict') {
+    return detail as ConflictDetail;
+  }
+  return null;
+}
 
 export function DictionaryViewer({ languageCode, languageName, onBack }: DictionaryViewerProps) {
   // Navigation state
@@ -85,21 +114,36 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
   });
   const [saving, setSaving] = useState(false);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [saveError, setSaveError] = useState<SaveError | null>(null);
+
+  // Delete state
+  const [selectedWords, setSelectedWords] = useState<Set<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState<{ words: string[]; error: string | null } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Load entries on mount
   useEffect(() => {
     loadEntries();
   }, [languageCode]);
 
-  const loadEntries = async () => {
+  // Defensive: DictionaryViewer has no `key={languageCode}` in its parent, so nothing
+  // guarantees a remount on language switch — clear stale selection/dialog state.
+  useEffect(() => {
+    setSelectedWords(new Set());
+    setConfirmDelete(null);
+  }, [languageCode]);
+
+  const loadEntries = async (): Promise<MergedDictionaryEntry[]> => {
     setLoading(true);
     setError(null);
     try {
       const data = await fetchDictionaryEntries(languageCode);
       setEntries(data.entries);
+      return data.entries;
     } catch (err) {
       setError('Failed to load dictionary entries. Please check if the backend is running.');
       console.error('Failed to load entries:', err);
+      return [];
     } finally {
       setLoading(false);
     }
@@ -137,10 +181,11 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
   };
 
   const handleCreateNew = () => {
-    setEditForm({ word: '', definition: '', partOfSpeech: '', examples: '' });
+    setEditForm({ word: '', definition: '', partOfSpeech: '', examples: '', whatWasWrong: '' });
     setIsCreatingNew(true);
     setIsEditing(true);
     setSelectedEntry(null);
+    setSaveError(null);
     setView('detail');
   };
 
@@ -148,6 +193,7 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
     e.stopPropagation();
     setSelectedEntry(entry);
     setView('detail');
+    setSaveError(null);
     setTimeout(() => {
       setEditForm({
         word: entry.word,
@@ -186,11 +232,13 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
       examples: selectedEntry?.examples?.join('\n') || '',
       whatWasWrong: ''
     });
+    setSaveError(null);
     setIsEditing(true);
   };
 
   const handleCancelEdit = () => {
     setIsEditing(false);
+    setSaveError(null);
     if (isCreatingNew) {
       setIsCreatingNew(false);
       setView('list');
@@ -201,23 +249,20 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
     if (!editForm.word.trim() || !editForm.definition.trim()) return;
 
     setSaving(true);
+    setSaveError(null);
     try {
       await saveDictionaryEntry(languageCode, {
         word: editForm.word.trim(),
         definition: editForm.definition.trim(),
         part_of_speech: editForm.partOfSpeech.trim() || undefined,
-        examples: editForm.examples.split('\n').filter(e => e.trim())
+        examples: editForm.examples.split('\n').filter(e => e.trim()),
+        // undefined in create mode (selectedEntry is null); selectedEntry.word (not
+        // editForm.word, which may have been changed by the user) when editing.
+        original_word: selectedEntry?.word
       });
 
-      // Reload entries to get updated data
+      // Reload entries so the list reflects the save before we navigate back to it.
       await loadEntries();
-
-      // Find the updated entry and select it
-      const updatedEntries = await fetchDictionaryEntries(languageCode);
-      const updated = updatedEntries.entries.find(e => e.word === editForm.word.trim().toLowerCase());
-      if (updated) {
-        setSelectedEntry(updated);
-      }
 
       if (!isCreatingNew && editForm.whatWasWrong.trim()) {
         injectContextNote(`[Correction note] ${editForm.word}: ${editForm.whatWasWrong}\nCorrected text: "${editForm.definition}"`);
@@ -232,10 +277,56 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
 
       setIsEditing(false);
       setIsCreatingNew(false);
+      // Every successful save returns to the list rather than that entry's detail page.
+      setView('list');
+      setSelectedEntry(null);
     } catch (err) {
       console.error('Failed to save entry:', err);
+      const conflict = err instanceof ApiError && err.status === 409 ? asConflictDetail(err.body) : null;
+      if (conflict) {
+        setSaveError({
+          message: conflict.message,
+          conflictWord: conflict.word,
+          existingPreview: {
+            partOfSpeech: conflict.existing_preview.part_of_speech,
+            definition: conflict.existing_preview.definition
+          }
+        });
+      } else {
+        setSaveError({ message: 'Failed to save entry. Please check if the backend is running and try again.' });
+      }
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Recovery from a 409: re-fetches the conflicting word's current data from the
+  // backend (not the local `entries` cache, which may be exactly what's stale)
+  // before touching editForm.
+  const handleViewExistingEntry = async (word: string) => {
+    try {
+      const data = await fetchDictionaryEntries(languageCode);
+      const found = data.entries.find(e => e.word === word);
+      if (!found) {
+        // Race with a concurrent deletion between the 409 and this click: the
+        // collision has cleared, so just clear the banner and let Save be retried.
+        setSaveError(null);
+        return;
+      }
+      setSelectedEntry(found);
+      setEditForm({
+        word: found.word,
+        definition: found.definition || '',
+        partOfSpeech: found.part_of_speech || '',
+        examples: found.examples?.join('\n') || '',
+        whatWasWrong: ''
+      });
+      setSaveError(null);
+      setIsEditing(true);
+      setIsCreatingNew(false);
+    } catch (err) {
+      console.error('Failed to fetch conflicting entry:', err);
+      setSaveError({ message: 'Failed to load the existing entry. Please check if the backend is running and try again.' });
     }
   };
 
@@ -260,37 +351,133 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
     }
   };
 
+  const toggleWordSelection = (word: string, checked: boolean) => {
+    setSelectedWords(prev => {
+      const next = new Set(prev);
+      if (checked) next.add(word); else next.delete(word);
+      return next;
+    });
+  };
+
+  const handleClearSelection = () => setSelectedWords(new Set());
+
+  const openDeleteConfirm = (words: string[]) => setConfirmDelete({ words, error: null });
+
+  const closeDeleteConfirm = () => {
+    if (deleting) return;  // dialog's onClose also fires on Escape/backdrop click
+    setConfirmDelete(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!confirmDelete) return;
+    setConfirmDelete(cd => cd ? { ...cd, error: null } : cd);
+    setDeleting(true);
+    try {
+      const result = await deleteDictionaryEntries(languageCode, confirmDelete.words);
+      // `absent` already represents "no longer in the dictionary" for every
+      // requested word — no union/split logic needed on the frontend.
+      const goneWords = new Set(result.absent);
+      setEntries(prev => prev.filter(e => !goneWords.has(e.word)));
+      setSelectedWords(prev => {
+        const next = new Set(prev);
+        goneWords.forEach(w => next.delete(w));
+        return next;
+      });
+      if (view === 'detail' && selectedEntry && goneWords.has(selectedEntry.word)) {
+        setView('list');
+        setSelectedEntry(null);
+      }
+      setConfirmDelete(null);
+    } catch (err) {
+      console.error('Failed to delete entry:', err);
+      const detail = err instanceof ApiError && typeof (err.body as { detail?: unknown })?.detail === 'string'
+        ? (err.body as { detail: string }).detail
+        : 'Failed to delete. Please check if the backend is running and try again.';
+      setConfirmDelete(cd => cd ? { ...cd, error: detail } : cd);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // Get entry for display
   const getCurrentVersion = (): MergedDictionaryEntry | undefined => {
     return selectedEntry ?? undefined;
   };
 
+  // Advisory-only pre-check: may miss a conflict due to stale local `entries`, but
+  // must never flag the entry currently being edited against itself — excluding
+  // normalize(selectedEntry.word) handles that; it's undefined in create mode, which
+  // no real word can equal, so the exclusion is a no-op there (any match is a conflict).
+  const wordConflictWarning = useMemo(() => {
+    const normalized = editForm.word.trim().toLowerCase();
+    if (!normalized) return null;
+    const originalNormalized = selectedEntry ? selectedEntry.word.trim().toLowerCase() : undefined;
+    const collision = entries.find(e => {
+      const eNormalized = e.word.trim().toLowerCase();
+      return eNormalized === normalized && eNormalized !== originalNormalized;
+    });
+    return collision ? `An entry for "${normalized}" already exists.` : null;
+  }, [editForm.word, entries, selectedEntry]);
+
   // Render word list
   const renderWordList = () => (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Search bar */}
-      <TextField
-        fullWidth
-        placeholder="Search dictionary..."
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-        sx={{
-          mb: 2,
-          '& .MuiOutlinedInput-root': {
-            bgcolor: 'rgba(255,255,255,0.05)',
-            '& fieldset': { borderColor: 'rgba(255,255,255,0.2)' },
-            '&:hover fieldset': { borderColor: 'rgba(255,255,255,0.4)' },
-          },
-          '& .MuiInputBase-input': { color: 'white' }
-        }}
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <Search sx={{ color: 'rgba(255,255,255,0.5)' }} />
-            </InputAdornment>
-          )
-        }}
-      />
+      {/* Search bar + New Entry button */}
+      <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+        <TextField
+          fullWidth
+          placeholder="Search dictionary..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          sx={{
+            '& .MuiOutlinedInput-root': {
+              bgcolor: 'rgba(255,255,255,0.05)',
+              '& fieldset': { borderColor: 'rgba(255,255,255,0.2)' },
+              '&:hover fieldset': { borderColor: 'rgba(255,255,255,0.4)' },
+            },
+            '& .MuiInputBase-input': { color: 'white' }
+          }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Search sx={{ color: 'rgba(255,255,255,0.5)' }} />
+              </InputAdornment>
+            )
+          }}
+        />
+        <Button
+          variant="contained"
+          startIcon={<Add />}
+          onClick={handleCreateNew}
+          sx={{ bgcolor: '#2196F3', flexShrink: 0 }}
+        >
+          New Entry
+        </Button>
+      </Box>
+
+      {/* Bulk-action bar */}
+      {selectedWords.size > 0 && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+          <Typography sx={{ color: 'white' }}>{selectedWords.size} selected</Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            startIcon={<DeleteIcon />}
+            onClick={() => openDeleteConfirm(Array.from(selectedWords))}
+          >
+            Delete Selected
+          </Button>
+          <Button
+            size="small"
+            variant="text"
+            onClick={handleClearSelection}
+            sx={{ color: 'rgba(255,255,255,0.7)' }}
+          >
+            Clear
+          </Button>
+        </Box>
+      )}
 
       {/* Entry list - enhanced cards with full details */}
       <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
@@ -299,10 +486,20 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
           const isVerified = entry.human_verified;
 
           return (
-            <motion.div key={entry.word} whileHover={{ scale: 1.005 }}>
+            <Box key={entry.word} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 1.5 }}>
+              {!isEditing && (
+                <Box sx={{ pt: 2 }} onClick={(e) => e.stopPropagation()}>
+                  <Checkbox
+                    size="small"
+                    checked={selectedWords.has(entry.word)}
+                    onChange={(e) => toggleWordSelection(entry.word, e.target.checked)}
+                    sx={{ p: 0.5, color: 'rgba(255,255,255,0.5)' }}
+                  />
+                </Box>
+              )}
+              <motion.div style={{ flex: 1, minWidth: 0 }} whileHover={{ scale: 1.005 }}>
               <Paper
                 sx={{
-                  mb: 1.5,
                   p: 2,
                   bgcolor: 'rgba(255,255,255,0.03)',
                   cursor: 'pointer',
@@ -422,7 +619,8 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
                   }}
                 />
               </Paper>
-            </motion.div>
+              </motion.div>
+            </Box>
           );
         })}
       </Box>
@@ -430,22 +628,9 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
       {filteredEntries.length === 0 && !loading && (
         <Box sx={{ textAlign: 'center', py: 6 }}>
           {entries.length === 0 ? (
-            <>
-              <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.7)', mb: 2 }}>
-                No dictionary entries yet
-              </Typography>
-              <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)', mb: 3 }}>
-                Start building your dictionary by adding the first entry.
-              </Typography>
-              <Button
-                variant="contained"
-                startIcon={<Add />}
-                onClick={handleCreateNew}
-                sx={{ bgcolor: '#2196F3' }}
-              >
-                Add First Entry
-              </Button>
-            </>
+            <Typography variant="h6" sx={{ color: 'rgba(255,255,255,0.7)' }}>
+              No dictionary entries yet
+            </Typography>
           ) : (
             <Typography sx={{ color: 'rgba(255,255,255,0.5)' }}>
               No matching entries found.
@@ -467,6 +652,8 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
         sx={{ mb: 2 }}
         InputProps={{ sx: { color: 'white' } }}
         InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.7)' } }}
+        helperText={wordConflictWarning || undefined}
+        FormHelperTextProps={{ sx: { color: '#ffb74d' } }}
       />
       <TextField
         fullWidth
@@ -532,6 +719,56 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
           Cancel
         </Button>
       </Box>
+
+      {saveError && (
+        <Box
+          sx={{
+            mt: 2,
+            p: 2,
+            borderRadius: 1,
+            bgcolor: 'rgba(244,67,54,0.1)',
+            border: '1px solid rgba(244,67,54,0.3)'
+          }}
+        >
+          <Typography sx={{ color: '#ff8a80', mb: saveError.existingPreview ? 1 : 0 }}>
+            {saveError.message}
+          </Typography>
+          {saveError.existingPreview && (
+            <Box sx={{ mb: 1.5 }}>
+              {saveError.existingPreview.partOfSpeech && (
+                <Chip
+                  size="small"
+                  label={saveError.existingPreview.partOfSpeech}
+                  sx={{ mb: 0.5, bgcolor: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)' }}
+                />
+              )}
+              <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)' }}>
+                {saveError.existingPreview.definition}
+              </Typography>
+            </Box>
+          )}
+          {saveError.conflictWord && (
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => handleViewExistingEntry(saveError.conflictWord!)}
+                sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}
+              >
+                View &amp; edit existing (replaces your draft)
+              </Button>
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => setSaveError(null)}
+                sx={{ color: 'rgba(255,255,255,0.7)' }}
+              >
+                Cancel
+              </Button>
+            </Box>
+          )}
+        </Box>
+      )}
     </Box>
   );
 
@@ -617,6 +854,14 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
               <CopyIconButton
                 text={[selectedEntry?.word, currentVersion?.part_of_speech, '', currentVersion?.definition, '', ...(currentVersion?.examples || [])].filter(Boolean).join('\n').trim()}
               />
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteIcon />}
+                onClick={() => selectedEntry && openDeleteConfirm([selectedEntry.word])}
+              >
+                Delete
+              </Button>
             </Box>
           </Box>
         )}
@@ -674,6 +919,30 @@ export function DictionaryViewer({ languageCode, languageName, onBack }: Diction
           </Paper>
         )}
       </Container>
+
+      {confirmDelete && (
+        <Dialog open onClose={closeDeleteConfirm}>
+          <DialogTitle>
+            {confirmDelete.words.length === 1
+              ? `Delete "${confirmDelete.words[0]}"?`
+              : `Delete ${confirmDelete.words.length} entries?`}
+          </DialogTitle>
+          <DialogContent>
+            <Typography sx={{ mb: confirmDelete.error ? 2 : 0 }}>
+              {`This will permanently remove: ${confirmDelete.words.slice(0, 5).join(', ')}` +
+                (confirmDelete.words.length > 5 ? `, and ${confirmDelete.words.length - 5} more` : '') +
+                '. This cannot be undone.'}
+            </Typography>
+            {confirmDelete.error && <Typography color="error">{confirmDelete.error}</Typography>}
+          </DialogContent>
+          <DialogActions>
+            <Button autoFocus onClick={closeDeleteConfirm} disabled={deleting}>Cancel</Button>
+            <Button color="error" variant="contained" onClick={handleConfirmDelete} disabled={deleting}>
+              {deleting ? <CircularProgress size={16} /> : 'Delete'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
     </Box>
   );
 }

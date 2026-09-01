@@ -216,6 +216,45 @@ class TestSearchLanguageNotes:
                 notes[i + 1].get("updated_at") or ""
             )
 
+    @pytest.mark.asyncio
+    async def test_match_in_title_only(self, mock_mcp_db):
+        """Search hits a note whose unique term appears in title but not body."""
+        from mcp_server.tools.memories import search_language_notes
+
+        # "telicity" appears only in bn-1.title
+        result = await search_language_notes(mock_mcp_db, "bughotu", "telicity")
+
+        assert "error" not in result
+        assert result["total"] == 1
+        assert result["notes"][0]["id"] == "bn-1"
+
+    @pytest.mark.asyncio
+    async def test_match_in_text_only(self, mock_mcp_db):
+        """Search hits a note whose unique term appears in body but not title."""
+        from mcp_server.tools.memories import search_language_notes
+
+        # "prefixal" appears only in bn-3.text
+        result = await search_language_notes(mock_mcp_db, "bughotu", "prefixal")
+
+        assert "error" not in result
+        assert result["total"] == 1
+        assert result["notes"][0]["id"] == "bn-3"
+
+    @pytest.mark.asyncio
+    async def test_match_in_both_fields_dedups(self, mock_mcp_db):
+        """A note whose term appears in both title and text is returned once."""
+        from mcp_server.tools.memories import search_language_notes
+
+        # "aspect" appears in bn-2.title AND bn-2.text — must dedupe.
+        # It also appears in bn-1.text ("Aspect particles..."), so total expected = 2.
+        result = await search_language_notes(mock_mcp_db, "bughotu", "aspect")
+
+        assert "error" not in result
+        matched_ids = [n["id"] for n in result["notes"]]
+        assert matched_ids.count("bn-2") == 1, "bn-2 must appear exactly once"
+        assert set(matched_ids) == {"bn-1", "bn-2"}
+        assert result["total"] == 2
+
 
 # =============================================================================
 # list_correction_log

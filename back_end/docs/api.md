@@ -221,12 +221,12 @@ curl -X GET "http://localhost:8221/api/check-connection"
 ```json
 {
   "status": "healthy",
-  "database": "nlm_db",
+  "database": "nlm_translator",
   "connected": true,
   "ping_success": true,
   "server_info": {
     "version": "7.0.0",
-    "platform": "MongoDB Atlas"
+    "platform": "macOS/64-bit"
   },
   "collections_count": 9
 }
@@ -448,10 +448,6 @@ Resume a batch session after approving/rejecting a verse proposal.
 
 Import USFM Bible files. See [import.md](./import.md) for details.
 
-#### POST /api/import-html-bible
-
-Import HTML Bible files. See [import.md](./import.md) for details.
-
 ---
 
 ### Export Endpoint
@@ -475,6 +471,8 @@ Create a timestamped gzipped BSON backup using `mongodump`.
 **Body**: `{output_dir: string}`
 
 **Response**: `{success, backup_dir, message, duration_ms}`
+
+Restore with `mongorestore --gzip --dir <backup_dir>`. Since authentication is now enforced, `mongorestore` needs the credential too (e.g. `--uri` with the connection string from `~/.nlm/mongodb_credentials.env`). Note **`mongorestore` is not bundled** — only `mongod` and `mongodump` are; install the MongoDB Database Tools separately to restore.
 
 ---
 
@@ -578,66 +576,3 @@ app.add_middleware(
 ## Interactive Documentation
 
 Swagger UI and ReDoc are disabled (`docs_url=None, redoc_url=None, openapi_url=None` in `main.py`). Use this document or direct `curl`/`httpie` calls to explore the API.
-
-## Code Examples
-
-### Python - Create New Language
-
-```python
-import requests
-
-BASE_URL = "http://localhost:8221/api"
-
-# Create a new language
-response = requests.post(
-    f"{BASE_URL}/new-language",
-    params={"language": "Swahili"}
-)
-
-if response.status_code == 200:
-    data = response.json()
-    print(f"Created language: {data['language_code']}")
-    print(f"Documents created: {data['documents_created']}")
-else:
-    print(f"Error: {response.json()['detail']}")
-```
-
-### JavaScript/Node.js - Fetch Languages
-
-```javascript
-const fetch = require('node-fetch');
-
-const BASE_URL = 'http://localhost:8221/api';
-
-async function getLanguages() {
-  const response = await fetch(`${BASE_URL}/languages`);
-
-  if (response.ok) {
-    const data = await response.json();
-    console.log('Languages:', data.languages);
-  } else {
-    const error = await response.json();
-    console.error('Error:', error.detail);
-  }
-}
-
-getLanguages();
-```
-
-### Async Python with httpx
-
-```python
-import httpx
-import asyncio
-
-BASE_URL = "http://localhost:8221/api"
-
-async def check_connection():
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{BASE_URL}/check-connection")
-        return response.json()
-
-# Run
-result = asyncio.run(check_connection())
-print(f"Status: {result['status']}")
-```

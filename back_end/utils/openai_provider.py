@@ -254,11 +254,11 @@ class OpenAIProvider:
             return
         except httpx.RequestError as e:
             logger.error(f"[openrouter-openai] Connection error model={self.model}: {e}")
-            yield {"type": "error", "content": f"Cannot connect to OpenRouter: {e}"}
+            yield {"type": "error", "content": "Cannot connect to OpenRouter"}
             return
-        except Exception as e:
-            logger.error(f"[openrouter-openai] Unexpected error model={self.model}: {e}")
-            yield {"type": "error", "content": str(e)}
+        except Exception:
+            logger.exception(f"[openrouter-openai] Unexpected error model={self.model}")
+            yield {"type": "error", "content": "Server error"}
             return
 
         if not effective_thinking and accumulated_reasoning:

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from shared.chat_config import get_public_config, update_config
-from utils.llm_provider import get_provider
+from utils.llm_provider import get_provider, ProviderConfigError
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,6 @@ router = APIRouter()
 
 class ChatConfigUpdate(BaseModel):
     llm_provider: Optional[str] = None
-    anthropic_api_key: Optional[str] = None
-    anthropic_model: Optional[str] = None
     openrouter_api_key: Optional[str] = None
     openrouter_model: Optional[str] = None
     local_base_url: Optional[str] = None
@@ -49,7 +47,7 @@ async def test_connection():
     """Test that the configured LLM provider is reachable and working."""
     try:
         provider = get_provider()
-    except ValueError as e:
+    except ProviderConfigError as e:
         return {"success": False, "error": str(e)}
 
     try:
@@ -66,6 +64,6 @@ async def test_connection():
             if event.get("type") == "done":
                 return {"success": True}
         return {"success": True}
-    except Exception as e:
-        logger.error(f"Test connection failed: {e}")
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Test connection failed")
+        return {"success": False, "error": "Connection test failed"}

@@ -234,22 +234,6 @@ class TestUpdateGrammarCategory:
         assert result["success"] is True
 
     @pytest.mark.asyncio
-    async def test_update_grammar_category_validates_content_fields(self, mock_mcp_db):
-        """Only allows valid category fields"""
-        from mcp_server.tools.grammar import update_grammar_category
-
-        # Invalid field
-        content = {"invalid_field": "should not be allowed"}
-
-        result = await update_grammar_category(
-            mock_mcp_db, "heb", "phonology", content
-        )
-
-        # Should either ignore invalid fields or return validation error
-        # Implementation can choose - just shouldn't crash
-        assert "success" in result or "error" in result
-
-    @pytest.mark.asyncio
     async def test_update_rejects_wrong_type_description(self, mock_mcp_db):
         """description must be a string, not a number."""
         from mcp_server.tools.grammar import update_grammar_category

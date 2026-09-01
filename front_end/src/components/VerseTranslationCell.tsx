@@ -112,7 +112,7 @@ export const VerseTranslationCell = React.memo(function VerseTranslationCell({
               rows={2}
               value={proposal.proposalFeedback?.feedbackText ?? ''}
               onChange={(e) => proposal.setProposalFeedback(prev => prev ? { ...prev, feedbackText: e.target.value } : prev)}
-              placeholder="Optional: describe the correction. This informs remaining verses."
+              placeholder="Optional: describe the correction. This helps Scribe learn."
               size="small"
               sx={{
                 mb: 1,

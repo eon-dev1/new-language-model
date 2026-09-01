@@ -24,7 +24,7 @@ from shared.chat_config import load_config
 from shared.llm_tool_loop import (
     run_tool_loop, get_context_window, CONVERSATIONS_COLLECTION, _append_message,
 )
-from utils.llm_provider import get_provider
+from utils.llm_provider import get_provider, ProviderConfigError
 from utils.chat_context import assemble_context
 
 logger = logging.getLogger(__name__)
@@ -139,12 +139,12 @@ async def chat_stream(request: ChatRequest):
             ):
                 yield line
 
-        except ValueError as e:
+        except ProviderConfigError as e:
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
-        except Exception as e:
-            logger.error(f"Chat stream error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'content': f'Server error: {e}'})}\n\n"
+        except Exception:
+            logger.exception("Chat stream error")
+            yield f"data: {json.dumps({'type': 'error', 'content': 'Server error'})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(
@@ -195,13 +195,23 @@ async def chat_tool_result(request: ToolResultRequest):
             tool_name = pending["tool_name"]
             if request.decision == "approve":
                 tool_input = request.modified_input or pending["input"]
+                # `modified_input` means the user edited the entry in the approval card
+                # before submitting; knowing which of the two payloads actually ran is
+                # essential when the saved result doesn't match what was on screen.
+                logger.info(
+                    f"Tool approved: {tool_name} "
+                    f"source={'modified_input' if request.modified_input else 'original_input'} "
+                    f"arg_keys={sorted(tool_input.keys()) if isinstance(tool_input, dict) else type(tool_input).__name__}"
+                )
                 try:
                     result = await call_tool(tool_name, tool_input, db)
                     tool_content = json.dumps(result, default=str)
+                    logger.info(f"Tool result ({tool_name}): {tool_content[:500]}")
                 except Exception as e:
-                    logger.error(f"Tool execution error ({tool_name}): {e}")
-                    tool_content = json.dumps({"error": str(e)})
+                    logger.exception(f"Tool execution error ({tool_name})")
+                    tool_content = json.dumps({"error": f"Tool '{tool_name}' failed ({type(e).__name__})"})
             else:
+                logger.info(f"Tool rejected by user: {tool_name}")
                 tool_content = json.dumps({"error": "User rejected this action"})
 
             # Rebuild messages from snapshot, replacing the placeholder result
@@ -241,9 +251,9 @@ async def chat_tool_result(request: ToolResultRequest):
             ):
                 yield line
 
-        except Exception as e:
-            logger.error(f"Chat tool-result stream error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'content': f'Server error: {e}'})}\n\n"
+        except Exception:
+            logger.exception("Chat tool-result stream error")
+            yield f"data: {json.dumps({'type': 'error', 'content': 'Server error'})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(

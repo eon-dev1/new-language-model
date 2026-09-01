@@ -38,7 +38,7 @@ class TestGlobalThinkingGate:
     """Verify the global config flag gates beta endpoint selection in stream_chat."""
 
     def _make_provider(self):
-        return AnthropicProvider(api_key="test", model="claude-sonnet-4-6", provider_type="anthropic")
+        return AnthropicProvider(api_key="test", model="claude-sonnet-4-6", provider_type="openrouter")
 
     @pytest.mark.asyncio
     async def test_global_flag_false_blocks_beta_even_when_requested(self):

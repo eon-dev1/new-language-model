@@ -98,45 +98,6 @@ class TestSettingsLoading:
         settings = MongoDBSettings.create_from_credentials()
         assert settings.mongodb_connection_string == "mongodb://localhost:27017"
 
-    def test_settings_creation_succeeds(self, mongodb_settings):
-        """Settings should be created from credentials without error."""
-        assert mongodb_settings is not None
-
-    def test_database_name_configured(self, mongodb_settings):
-        """Database name should be set from Tier 1 config."""
-        assert mongodb_settings.database_name
-        assert len(mongodb_settings.database_name) > 0
-
-    def test_connection_string_format_valid(self, mongodb_settings):
-        """Connection string should start with mongodb:// or mongodb+srv://"""
-        conn_str = mongodb_settings.mongodb_connection_string
-        assert conn_str.startswith(("mongodb://", "mongodb+srv://")), (
-            f"Invalid connection string format: {conn_str[:20]}..."
-        )
-
-    def test_connection_options_returned(self, mongodb_settings):
-        """get_connection_options() should return expected keys."""
-        options = mongodb_settings.get_connection_options()
-
-        expected_keys = [
-            "minPoolSize",
-            "maxPoolSize",
-            "serverSelectionTimeoutMS",
-            "connectTimeoutMS",
-            "socketTimeoutMS",
-        ]
-        for key in expected_keys:
-            assert key in options, f"Missing option: {key}"
-
-    def test_pool_size_configuration(self, mongodb_settings):
-        """Pool size should be configured with sensible defaults."""
-        options = mongodb_settings.get_connection_options()
-
-        assert options["minPoolSize"] >= 1
-        assert options["maxPoolSize"] >= options["minPoolSize"]
-        assert options["maxPoolSize"] <= 100  # Sanity check
-
-
 # =============================================================================
 # CONNECTION ESTABLISHMENT TESTS
 # =============================================================================

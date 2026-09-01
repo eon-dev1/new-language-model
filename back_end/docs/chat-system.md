@@ -37,7 +37,7 @@ Frontend (ChatDrawer / BibleReader)
 +------------------+  +------------------+
 | utils/           |  | shared/          |
 | llm_provider.py  |  | tool_registry.py |
-| - Anthropic SDK  |  | - 20 tools       |
+| - Anthropic SDK  |  | - 21 tools       |
 | - OpenRouter     |  | - read/write     |
 | - Local LLM      |  | - dispatch       |
 +------------------+  +------------------+
@@ -110,7 +110,7 @@ Per-tool-result truncation: each result is capped at 25K characters with boundar
 
 ## Tool Registry (`shared/tool_registry.py`)
 
-20 tools sourced from MCP server implementations. Each tool has metadata flags:
+21 tools sourced from MCP server implementations (see `_TOOL_DEFINITIONS` in `shared/tool_registry.py`). Each tool has metadata flags:
 
 | Flag | Purpose |
 |------|---------|
@@ -215,14 +215,14 @@ When `think_harder` mode is active, the triologue skill content is appended to t
 
 ## Key Source Files
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| `shared/llm_tool_loop.py` | 332 | Shared streaming tool-use loop |
-| `utils/llm_provider.py` | 255 | LLM provider abstraction (Anthropic, OpenRouter, local) |
-| `utils/openai_provider.py` | — | OpenAI-compatible provider for Qwen models via OpenRouter |
-| `shared/tool_registry.py` | 609 | Tool definitions, dispatch, read/write classification |
-| `shared/chat_config.py` | 113 | `~/.nlm/chat_config.json` management |
-| `routes/chat.py` | 257 | Chat streaming + tool-result endpoints |
-| `routes/translate.py` | 374 | Single + batch translation endpoints |
-| `utils/chat_context.py` | — | Assembles MongoDB data context for system prompt |
-| `shared/system_prompt.py` | — | Static system prompt for general chat |
+| File | Purpose |
+|------|---------|
+| `shared/llm_tool_loop.py` | Shared streaming tool-use loop |
+| `utils/llm_provider.py` | LLM provider abstraction (Anthropic, OpenRouter, local) |
+| `utils/openai_provider.py` | OpenAI-compatible provider for Qwen models via OpenRouter |
+| `shared/tool_registry.py` | Tool definitions, dispatch, read/write classification |
+| `shared/chat_config.py` | `~/.nlm/chat_config.json` management |
+| `routes/chat.py` | Chat streaming + tool-result endpoints |
+| `routes/translate.py` | Single + batch translation endpoints |
+| `utils/chat_context.py` | Assembles MongoDB data context for system prompt |
+| `shared/system_prompt.py` | Static system prompt for general chat |

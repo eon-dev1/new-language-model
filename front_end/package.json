@@ -14,7 +14,8 @@
     "start": "electron dist/main/main.js",
     "prepare:mongo": "node scripts/download-mongo-binaries.js",
     "predev": "node scripts/download-mongo-binaries.js",
-    "dev": "concurrently --names \"main,renderer,electron\" \"npm run dev:main\" \"npm run dev:renderer\" \"node scripts/wait-file.js dist/main/main.js && electron dist/main/main.js\"",
+    "setup": "node scripts/setup.js",
+    "dev": "concurrently --kill-others --success first --names \"main,renderer,electron\" \"npm run dev:main\" \"npm run dev:renderer\" \"node scripts/wait-file.js dist/main/main.js && electron dist/main/main.js\"",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write .",
     "test": "vitest run && vitest run --config vitest.renderer.config.ts",
@@ -25,10 +26,9 @@
   "dependencies": {
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
-    "@fontsource/orbitron": "^5.2.6",
     "@mui/icons-material": "^5.18.0",
     "@mui/material": "^5.18.0",
-    "electron": "^39.8.9",
+    "electron": "^43.4.0",
     "framer-motion": "^10.18.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

@@ -18,5 +18,6 @@ class Collection(str, Enum):
     DICTIONARIES = "dictionaries"
     GRAMMAR_SYSTEMS = "grammar_systems"
     WORD_INDEX = "word_index"
+    PHRASE_INDEX = "phrase_index"
     LANGUAGE_NOTES = "language_notes"
     CORRECTION_LOG = "correction_log"

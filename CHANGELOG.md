@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## 2026-08-05 to 2026-08-26
+
+### Added
+
+- **Phrase-index search** (`back_end/utils/phrase_index/`) — streaming 4-gram phrase index with a debounced rebuild scheduler, cross-lingual and intra-target lookup modes, exposed as the `get_phrase_context` MCP tool and wired into the bible import/load routes; 34 unit tests covering determinism, idempotency, and edge-case guards
+- **Note titles** — `NoteItem.title` added end-to-end: schema (`schema_enforcer/schema_definition.py`), route validation with a strip-then-reject-empty validator, MCP `search_language_notes` now matches title and text, and an idempotent, dry-run-by-default migration (`add_note_titles.py`) that self-verifies and exits non-zero on any title-less survivor
+- **Dictionary entry delete + manual entry + conflict handling** — pipeline-based delete route (case- and whitespace-insensitive word matching, `entry_count` kept consistent via `$size`), a 409 conflict response with an `existing_preview` when a manual save would collide with a different existing entry, matching MCP tool support, and full test coverage
+- **`setup_auth.py`** (`back_end/db_connector/`, new, ~360 lines) — first-run MongoDB auth decision tree: detects auth state via an anonymous probe, spawns `mongod --auth` or attaches to an already-running instance, creates credentials then demotes via the localhost exception, resumes cleanly from an interrupted run, and writes the credentials file atomically (`mkstemp` + `fsync` + `chmod 0600` + `os.replace`)
+- **`front_end/scripts/setup.js`** — new Stage 0–6 setup orchestrator composing `npm install`, venv creation, pip install, MongoDB binary download, and `setup_auth.py` into one first-run script; wired into `package.json`
+- **Secret-scanning pre-commit hook** — `.githooks/pre-commit` → `ci/secrets_detector/secret-scan-staged.sh` (trufflehog-based, with a filename guard for `mongodb_credentials.env`); `setup.js` sets `core.hooksPath` and warns if trufflehog is missing
+- **Supply-chain hygiene checker** (`ci/supply_chain_hygiene.py`) — stdlib-only, cross-platform, no new dependencies
+- **GPG verification for Linux MongoDB downloads** (`download-mongo-binaries.js`) — full error classification, `VALIDSIG` field parsing, ephemeral keyring, and agent cleanup on exit
+- **`reconcile_bible_books_shape` migration** — reconciles legacy `bible_books` document shape alongside USFM importer changes, with dedicated tests
+
+### Changed
+
+- **`mongod --auth` enforced by default** — flipped on in both `mongod-manager.ts` and `conftest.py`; the stale `--noauth` comment now points at where enforcement is verified
+- **Exception handling sanitized across the backend** — every `except...as e` handler in chat, translate, backup, word-index, and connection code now routes through a new `api_error` helper / `ProviderConfigError`, so raw exception text (paths, credentials) can no longer leak into API responses; verified by a new AST-based scanner (`test_exception_sanitization_invariant.py`) that walks every handler and found 23 pre-fix violations, 0 after
+- **Credential redaction centralized** (`back_end/shared/logging_setup.py`, new) — `redact()` strips URI userinfo from log messages and traceback text; wired into `main.py`, `mcp_server/server.py`, and `conftest.py`
+- **DB connection validation strengthened** — `connect()` now validates with `list_collection_names()` on the target db instead of `admin.command('ping')`; `get_mongodb_connector()` builds and connects locally, only publishing to the global connector on success
+- **Anthropic LLM provider removed** — default provider is now `"openrouter"`; `provider_type` narrowed to `["local", "openrouter"]`; local-LLM support added; a two-layer legacy migration coerces old `anthropic_*` config keys on disk and in memory
+- **Schema enforcer hardened** — startup enforcement of 17 indexes including the previously-missing `phrase_lookup` (on `phrase_index`) and `book_lookup` (on `bible_books`); `validate_document` now recurses into embedded schema blocks (e.g. `bible_books.chapters`); `base_structure_bible` seeded at startup; a bare `except: pass` in sample validation now logs a warning instead of swallowing errors
+- **Notes UI overhaul** (`front_end/src/components/NotesTab.tsx`) — front-end side of the note-titles feature plus general note-editing improvements
+- **Dependency updates** — Electron bumped to `43`, `nanoid` updated, `npm audit fix` applied, unused `@fontsource/orbitron` removed
+
+### Removed
+
+- **HTML-import feature** — `back_end/utils/html_parser/` deleted (~650 lines) along with its routes, MCP tool references, and docs (`import.md`, `api.md`, `architecture.md`)
+- **Dead/tautological tests** — a broad sweep removed tests that were guaranteed to pass by construction or duplicated sibling coverage, without touching production code
+
+---
+
 ## [1.2.0] - 2026-05-07
 
 ### Added

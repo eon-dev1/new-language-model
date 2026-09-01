@@ -9,7 +9,7 @@ and upsert support.
 import asyncio
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -56,7 +56,7 @@ def _verse_to_document(
     Returns:
         Dictionary suitable for MongoDB insert/update
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # For English (base language), text goes to english_text
     # For other languages, it could go to translated_text
@@ -147,7 +147,7 @@ async def import_usfm_to_mongodb(
                 # Build update operation
                 update_doc = {
                     "$set": doc,
-                    "$setOnInsert": {"created_at": datetime.utcnow()}
+                    "$setOnInsert": {"created_at": datetime.now(timezone.utc)}
                 }
 
                 operations.append({
@@ -268,108 +268,6 @@ async def import_usfm_directory_to_mongodb(
     return result
 
 
-async def update_bible_books_collection(
-    language_code: str = "english",
-    connector = None
-) -> int:
-    """
-    Update bible_books collection with verse text from bible_texts.
-
-    This syncs the embedded verses in bible_books with the individual
-    verse documents in bible_texts. Usually run after import_usfm_*.
-
-    Args:
-        language_code: Language to update
-        connector: Optional MongoDBConnector instance
-
-    Returns:
-        Number of books updated
-    """
-    # Import here to avoid circular imports
-    from db_connector.connection import MongoDBConnector
-
-    manage_connection = connector is None
-    books_updated = 0
-
-    try:
-        if manage_connection:
-            connector = MongoDBConnector()
-            await connector.connect()
-
-        db = connector.get_database()
-        texts_collection = db[BIBLE_TEXTS_COLLECTION]
-        books_collection = db[BIBLE_BOOKS_COLLECTION]
-
-        # Get all unique book codes for this language
-        pipeline = [
-            {"$match": {
-                "language_code": language_code,
-            }},
-            {"$group": {"_id": "$book_code"}}
-        ]
-
-        book_codes = [doc["_id"] async for doc in texts_collection.aggregate(pipeline)]
-
-        logger.info(f"Updating {len(book_codes)} books in bible_books collection")
-
-        for book_code in book_codes:
-            # Get all verses for this book
-            verses_cursor = texts_collection.find({
-                "language_code": language_code,
-                "book_code": book_code,
-            }).sort([("chapter", 1), ("verse", 1)])
-
-            # Group by chapter
-            chapters_data = {}
-            async for verse_doc in verses_cursor:
-                chapter_num = verse_doc["chapter"]
-                if chapter_num not in chapters_data:
-                    chapters_data[chapter_num] = []
-
-                chapters_data[chapter_num].append({
-                    "verse_number": verse_doc["verse"],
-                    "english_text": verse_doc.get("english_text", ""),
-                    "translated_text": verse_doc.get("translated_text", ""),
-                    "comments": ""
-                })
-
-            # Update bible_books document
-            if chapters_data:
-                # Build chapters array update
-                update_chapters = []
-                for chapter_num in sorted(chapters_data.keys()):
-                    verses = sorted(chapters_data[chapter_num], key=lambda v: v["verse_number"])
-                    update_chapters.append({
-                        "chapter_number": chapter_num,
-                        "verse_count": len(verses),
-                        "verses": verses
-                    })
-
-                await books_collection.update_one(
-                    {
-                        "language_code": language_code,
-                        "book_code": book_code,
-                    },
-                    {
-                        "$set": {
-                            "chapters": update_chapters,
-                            "updated_at": datetime.utcnow()
-                        }
-                    }
-                )
-                books_updated += 1
-
-        logger.info(f"Updated {books_updated} book documents")
-
-    except Exception as e:
-        logger.error(f"Error updating bible_books: {e}")
-    finally:
-        if manage_connection and connector:
-            await connector.disconnect()
-
-    return books_updated
-
-
 async def sync_bible_books_from_texts(
     language_code: str,
     connector=None
@@ -403,9 +301,13 @@ async def sync_bible_books_from_texts(
         pipeline = [
             {"$match": {"language_code": language_code}},
             {"$group": {
-                "_id": "$book_code",
-                "total_verses": {"$sum": 1},
-                "chapters": {"$addToSet": "$chapter"}
+                "_id": {"book_code": "$book_code", "chapter": "$chapter"},
+                "verse_count": {"$sum": 1}
+            }},
+            {"$group": {
+                "_id": "$_id.book_code",
+                "chapters": {"$push": {"chapter": "$_id.chapter", "verse_count": "$verse_count"}},
+                "total_verses": {"$sum": "$verse_count"}
             }}
         ]
 
@@ -414,7 +316,9 @@ async def sync_bible_books_from_texts(
 
         async for doc in texts.aggregate(pipeline):
             book_code = doc["_id"]
-            total_chapters = len(doc["chapters"])
+            # $push does not guarantee element order, so sort by chapter here.
+            chapters = sorted(doc["chapters"], key=lambda c: c["chapter"])
+            total_chapters = len(chapters)
             total_verses = doc["total_verses"]
 
             usfm_code = BOOK_CODE_TO_USFM.get(book_code, "")
@@ -433,15 +337,16 @@ async def sync_bible_books_from_texts(
                         "book_name": book_name,
                         "total_chapters": total_chapters,
                         "total_verses": total_verses,
+                        "chapters": chapters,
                         "translation_status": "imported",
                         "metadata.testament": testament,
                         "metadata.canonical_order": canonical_pos,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now(timezone.utc)
                     },
                     "$setOnInsert": {
                         "language_code": language_code,
                         "book_code": book_code,
-                        "created_at": datetime.utcnow()
+                        "created_at": datetime.now(timezone.utc)
                     }
                 },
                 upsert=True

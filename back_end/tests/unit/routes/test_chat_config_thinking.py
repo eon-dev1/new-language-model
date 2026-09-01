@@ -73,7 +73,7 @@ def test_omitting_thinking_enabled_does_not_reset_it(tmp_path, monkeypatch):
     client.post("/api/chat/config", json={"thinking_enabled": False})
 
     # Save an unrelated field without including thinking_enabled
-    client.post("/api/chat/config", json={"llm_provider": "anthropic"})
+    client.post("/api/chat/config", json={"llm_provider": "openrouter"})
 
     r = client.get("/api/chat/config")
     assert r.json()["thinking_enabled"] is False, (

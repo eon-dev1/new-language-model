@@ -25,6 +25,21 @@ from mcp_server.tools.base import (
 )
 from routes.dictionary import CreateEntryRequest
 
+logger = logging.getLogger(__name__)
+
+
+def _entry_debug_summary(entry: dict[str, Any]) -> str:
+    """
+    Compact, log-safe description of an inbound entry.
+
+    Logs the key names verbatim (that's what diagnoses schema mismatches, e.g. a model
+    sending human_verified) but only the length of free-text values, so a large
+    definition can't flood the log.
+    """
+    word = str(entry.get("word", "<no word>"))[:60]
+    definition_len = len(str(entry.get("definition", "")))
+    return f"word={word!r} keys={sorted(entry.keys())} definition_len={definition_len}"
+
 
 async def _get_dictionary_doc(db, language_code: str) -> dict | None:
     """
@@ -169,14 +184,25 @@ async def upsert_dictionary_entries(
     Returns:
         {"created": int, "updated": int, "total": int}
     """
+    logger.info(
+        f"upsert_dictionary_entries CALLED language={language_code!r} "
+        f"entry_count={len(entries) if entries else 0}"
+    )
+    for i, entry in enumerate(entries or []):
+        logger.info(f"  inbound entry[{i}]: {_entry_debug_summary(entry)}")
+
     # Validate language exists
     try:
         await validate_language(db, language_code)
     except ToolError as e:
+        logger.warning(
+            f"upsert REJECTED at language validation: language={language_code!r} code={e.code}"
+        )
         return error_response(e)
 
     # Handle empty entries
     if not entries:
+        logger.info("upsert short-circuit: empty entries list, nothing written")
         return success_response({"created": 0, "updated": 0, "total": 0})
 
     # Validate each entry has required fields
@@ -203,8 +229,31 @@ async def upsert_dictionary_entries(
     for entry in entries:
         try:
             validated = CreateEntryRequest.model_validate(entry)
-            validated_entries.append(validated.model_dump(exclude_unset=True))
+            # original_word is a REST-only disambiguation signal, never persisted here.
+            dumped = validated.model_dump(exclude_unset=True, exclude={"original_word"})
+            # Forced True to match routes/dictionary.py's REST endpoint, which also
+            # hardcodes human_verified=True on save. This covers the in-app chat path:
+            # tool_registry.py registers this tool readonly=False, so routes/chat.py's
+            # call_tool() always shows the approval card before invoking it. It does NOT
+            # cover mcp_server/server.py's FastMCP entrypoint (used when this repo's
+            # .mcp.json wires nlm-database into Claude Code/Desktop directly) — that path
+            # never touches tool_registry.py, so review there depends entirely on the
+            # calling MCP client's own tool-approval settings, not on anything enforced
+            # in this codebase. Revisit if that path needs its own explicit gate.
+            dumped["human_verified"] = True
+            validated_entries.append(dumped)
         except ValidationError as e:
+            # The single most common real-world failure: a model sends an extra key
+            # (CreateEntryRequest is extra="forbid"), so log exactly which fields
+            # Pydantic objected to rather than only that "validation failed".
+            rejected_fields = [
+                ".".join(str(p) for p in err.get("loc", ())) for err in e.errors()
+            ]
+            logger.warning(
+                f"upsert REJECTED at pydantic validation: {_entry_debug_summary(entry)} "
+                f"rejected_fields={rejected_fields} error_types="
+                f"{[err.get('type') for err in e.errors()]}"
+            )
             return error_response(
                 ToolError(
                     "validation_error",
@@ -213,6 +262,7 @@ async def upsert_dictionary_entries(
                 )
             )
     entries = validated_entries
+    logger.info(f"upsert validation passed for {len(entries)} entries")
 
     dictionaries = db.get_collection("dictionaries")
 
@@ -232,9 +282,18 @@ async def upsert_dictionary_entries(
             "entry_count": len(entries),
             "created_at": now,
         }
-        await dictionaries.insert_one(new_doc)
+        logger.info(
+            f"upsert branch=NEW_DOC: no existing dictionary for {language_code!r}, "
+            f"inserting doc with {len(entries)} entries"
+        )
+        insert_result = await dictionaries.insert_one(new_doc)
+        logger.info(f"upsert NEW_DOC insert_one inserted_id={insert_result.inserted_id!r}")
 
         await _sync_word_index_flags(db, language_code, entries)
+        logger.info(
+            f"upsert DONE (new doc) language={language_code!r} "
+            f"created={len(entries)} updated=0 total={len(entries)}"
+        )
         return success_response(
             {"created": len(entries), "updated": 0, "total": len(entries)}
         )
@@ -242,10 +301,22 @@ async def upsert_dictionary_entries(
     # Build word→index lookup for O(n+m) performance
     existing_entries = doc.get("entries", [])
     word_to_index = {e["word"]: i for i, e in enumerate(existing_entries)}
+    # Local mirror of what's actually at each index in the document, kept in sync as we
+    # go. Needed because a batch can repeat a word (e.g. an LLM correcting the same
+    # entry twice in one call): the second occurrence must merge against what the first
+    # occurrence just wrote, not against the pre-loop `existing_entries` snapshot, which
+    # doesn't have an entry at a not-yet-pushed index and would raise IndexError.
+    known_entries = list(existing_entries)
 
     created = 0
     updated = 0
     now = datetime.now(timezone.utc)
+
+    logger.info(
+        f"upsert branch=EXISTING_DOC _id={doc['_id']!r} "
+        f"existing_entry_count={len(existing_entries)} "
+        f"stored_entry_count_field={doc.get('entry_count')!r}"
+    )
 
     for entry in entries:
         word = entry["word"]
@@ -254,29 +325,47 @@ async def upsert_dictionary_entries(
         if word in word_to_index:
             # Update existing entry
             idx = word_to_index[word]
-            await dictionaries.update_one(
+            merged = {**known_entries[idx], **entry}
+            result = await dictionaries.update_one(
                 {"_id": doc["_id"]},
-                {"$set": {f"entries.{idx}": {**existing_entries[idx], **entry}}},
+                {"$set": {f"entries.{idx}": merged}},
             )
+            # matched/modified are otherwise discarded here. A modified_count of 0 is
+            # the signature of a write that silently did nothing (doc vanished, or the
+            # $set was a no-op), which the return value alone would still report as a
+            # successful "updated".
+            logger.info(
+                f"upsert $SET word={word!r} idx={idx} "
+                f"matched={result.matched_count} modified={result.modified_count} "
+                f"human_verified={merged.get('human_verified')!r}"
+            )
+            known_entries[idx] = merged
             updated += 1
         else:
             # Insert new entry
             entry["created_at"] = now
-            await dictionaries.update_one(
+            result = await dictionaries.update_one(
                 {"_id": doc["_id"]},
                 {"$push": {"entries": entry}, "$inc": {"entry_count": 1}},
             )
+            logger.info(
+                f"upsert $PUSH word={word!r} "
+                f"matched={result.matched_count} modified={result.modified_count} "
+                f"human_verified={entry.get('human_verified')!r}"
+            )
             # Add to lookup for subsequent entries
-            word_to_index[word] = len(existing_entries) + created
+            word_to_index[word] = len(known_entries)
+            known_entries.append(entry)
             created += 1
 
     total = len(existing_entries) + created
 
     await _sync_word_index_flags(db, language_code, entries)
+    logger.info(
+        f"upsert DONE language={language_code!r} "
+        f"created={created} updated={updated} total={total}"
+    )
     return success_response({"created": created, "updated": updated, "total": total})
-
-
-logger = logging.getLogger(__name__)
 
 
 async def _sync_word_index_flags(

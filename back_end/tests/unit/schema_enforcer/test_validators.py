@@ -101,6 +101,90 @@ class TestBookOrderValidation:
         assert len(validate_book_order(-1)) > 0
 
 
+class TestEmbeddedSchemaRecursion:
+    """Tests for validate_document's recursion into embedded_schema blocks."""
+
+    def _valid_bible_books_doc(self):
+        return {
+            "language_code": "english",
+            "book_name": "Genesis",
+            "book_code": "genesis",
+            "total_chapters": 1,
+            "total_verses": 31,
+            "chapters": [{"chapter": 1, "verse_count": 31}],
+            "created_at": "2024-01-01T00:00:00Z",
+            "translation_status": "imported",
+            "metadata": {"testament": "old", "canonical_order": 1},
+        }
+
+    def test_list_typed_recursion_catches_missing_subfield(self):
+        """A chapters[] item missing verse_count is flagged."""
+        from utils.schema_enforcer.validators import validate_document
+        from utils.schema_enforcer.schema_definition import EXPECTED_COLLECTIONS
+
+        doc = self._valid_bible_books_doc()
+        doc["chapters"] = [{"chapter": 1}]  # missing verse_count
+        schema = EXPECTED_COLLECTIONS["bible_books"]
+
+        issues = validate_document(doc, schema, "bible_books")
+
+        assert any(
+            "chapters[]" in issue and "verse_count" in issue for issue in issues
+        ), issues
+
+    def test_dict_typed_recursion_catches_missing_subfield(self):
+        """The metadata dict missing canonical_order is flagged."""
+        from utils.schema_enforcer.validators import validate_document
+        from utils.schema_enforcer.schema_definition import EXPECTED_COLLECTIONS
+
+        doc = self._valid_bible_books_doc()
+        doc["metadata"] = {"testament": "old"}  # missing canonical_order
+        schema = EXPECTED_COLLECTIONS["bible_books"]
+
+        issues = validate_document(doc, schema, "bible_books")
+
+        assert any(
+            "metadata" in issue and "canonical_order" in issue for issue in issues
+        ), issues
+
+    def test_valid_doc_has_no_embedded_issues(self):
+        """A fully-conforming doc produces no embedded-schema issues."""
+        from utils.schema_enforcer.validators import validate_document
+        from utils.schema_enforcer.schema_definition import EXPECTED_COLLECTIONS
+
+        doc = self._valid_bible_books_doc()
+        schema = EXPECTED_COLLECTIONS["bible_books"]
+
+        issues = validate_document(doc, schema, "bible_books")
+
+        assert issues == []
+
+    def test_missing_embedded_field_entirely_does_not_crash(self):
+        """A doc missing chapters altogether is caught by required_fields, not a crash."""
+        from utils.schema_enforcer.validators import validate_document
+        from utils.schema_enforcer.schema_definition import EXPECTED_COLLECTIONS
+
+        doc = self._valid_bible_books_doc()
+        del doc["chapters"]
+        schema = EXPECTED_COLLECTIONS["bible_books"]
+
+        issues = validate_document(doc, schema, "bible_books")
+
+        assert any("Missing required field: chapters" in issue for issue in issues)
+
+    def test_dict_typed_field_does_not_misfire_as_list(self):
+        """metadata (a dict) sitting beside chapters (a list) must not be iterated as a list."""
+        from utils.schema_enforcer.validators import validate_embedded_schema
+        from utils.schema_enforcer.schema_definition import EXPECTED_COLLECTIONS
+
+        doc = self._valid_bible_books_doc()
+        schema = EXPECTED_COLLECTIONS["bible_books"]
+
+        # Should not raise even though metadata is a dict, not a list.
+        issues = validate_embedded_schema(doc, schema, "bible_books")
+        assert issues == []
+
+
 class TestValidatorFactories:
     """Tests for validator factory functions"""
 

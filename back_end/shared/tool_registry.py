@@ -12,6 +12,7 @@ Tool functions live in mcp_server/tools/. This registry:
 4. Provides call_tool() to dispatch tool calls by name
 """
 
+import logging
 from typing import Any
 
 # Import tool functions from MCP tools (the single source of truth)
@@ -38,12 +39,16 @@ from mcp_server.tools.word_index import (
     get_words_not_in_dictionary,
     get_word_frequency_list,
 )
+from mcp_server.tools.phrase_index import get_phrase_context
 from mcp_server.tools.memories import (
     list_language_notes,
     search_language_notes,
     list_correction_log,
     search_correction_log,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 # Async stub for propose_verse_translation.
@@ -482,6 +487,62 @@ _TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
         "readonly": True,
     },
+    # --- Phrase Index Tool (translation-only) ---
+    {
+        "name": "get_phrase_context",
+        "description": (
+            "Find recurring distinctive phrases (4-grams) in this text and where else they appear. "
+            "Use for two purposes: (a) source-side reuse — pass the English verse to find phrases with "
+            "already-translated renderings; (b) target-side consistency — pass your draft in the target "
+            "language to find phrases already used in verified translations elsewhere. Returns each "
+            "recurring phrase plus the verified text at other locations."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "language_code": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Language of the text being scanned; selects which phrase_index to query",
+                },
+                "text": {
+                    "type": "string",
+                    "maxLength": 50000,
+                    "description": "Text to scan for recurring 4-grams. Hard-capped at 50K chars; longer inputs return ToolError.",
+                },
+                "location_text_language": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": (
+                        "Language to fetch text in at each location. Defaults to language_code. "
+                        "Set to a different language for cross-lingual reuse (e.g., scan English, fetch target translations)."
+                    ),
+                },
+                "book_code": {
+                    "type": "string",
+                    "description": "Optional: current verse position for self-reference exclusion",
+                },
+                "chapter": {"type": "integer", "minimum": 1},
+                "verse": {"type": "integer", "minimum": 1},
+                "min_word_df_max": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": (
+                        "Filter scaffolding phrases — keep only phrases whose rarest token appears in <= N verses. "
+                        "Default 200. Use 50 for the most distinctive only."
+                    ),
+                },
+                "max_locations_per_phrase": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Cap locations per phrase. Default 10.",
+                },
+            },
+            "required": ["language_code", "text"],
+        },
+        "readonly": True,
+        "translation_only": True,
+    },
     # --- Translation-only tools (excluded from general chat by translation_only=True) ---
     {
         "name": "propose_verse_translation",
@@ -530,6 +591,7 @@ _TOOL_FUNCTIONS: dict[str, Any] = {
     "get_word_index": get_word_index,
     "get_words_not_in_dictionary": get_words_not_in_dictionary,
     "get_word_frequency_list": get_word_frequency_list,
+    "get_phrase_context": get_phrase_context,
     "list_language_notes": list_language_notes,
     "search_language_notes": search_language_notes,
     "list_correction_log": list_correction_log,
@@ -593,7 +655,27 @@ async def call_tool(name: str, args: dict[str, Any], db) -> dict[str, Any]:
     # Strip save_to_file from args if present (chat doesn't write files)
     args = {k: v for k, v in args.items() if k != "save_to_file"}
 
-    return await func(db, **args)
+    # Log arg *keys* only, not values: this is the single dispatch point for every
+    # in-app tool call, and values can be arbitrarily large model output. Keys are what
+    # diagnose an argument-shape mismatch (a model inventing a parameter binds straight
+    # through `func(db, **args)` and raises TypeError with no other trace).
+    logger.info(
+        f"call_tool dispatch name={name!r} write={is_write_tool(name)} "
+        f"arg_keys={sorted(args.keys())}"
+    )
+
+    result = await func(db, **args)
+
+    if isinstance(result, dict) and "error" in result:
+        err = result["error"]
+        logger.warning(
+            f"call_tool name={name!r} returned error "
+            f"code={err.get('code') if isinstance(err, dict) else err!r}"
+        )
+    else:
+        logger.info(f"call_tool name={name!r} succeeded")
+
+    return result
 
 
 def is_write_tool(name: str) -> bool:

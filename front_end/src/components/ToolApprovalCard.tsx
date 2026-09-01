@@ -80,7 +80,12 @@ export const ToolApprovalCard: React.FC<Props> = ({ approval, onApprove, onRejec
 
       const entry = entries[i];
       if (!entry) continue;  // defensive — index-sync invariant
-      approvedEntries.push({ ...entry, human_verified: true });
+      // Send the entry as-is. Do NOT add human_verified here: the backend owns that
+      // flag and forces it to true for anything saved through this approval path
+      // (mcp_server/tools/dictionary.py). Sending it from the client is rejected
+      // outright — CreateEntryRequest is extra="forbid", so an entry carrying
+      // human_verified fails validation and the whole save silently does nothing.
+      approvedEntries.push({ ...entry });
 
       const edited = JSON.stringify(entry) !== JSON.stringify(originalEntries[i]);
       if (edited && d.comment.trim()) {

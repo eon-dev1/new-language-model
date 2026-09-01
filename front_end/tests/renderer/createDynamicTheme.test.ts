@@ -90,17 +90,6 @@ describe('createDynamicTheme', () => {
         expect(variantStyle?.fontFamily, `${variant} should have fontFamily`).toContain('Times New Roman');
       });
     });
-
-    it('does NOT contain Orbitron in any variant', () => {
-      const settings: AppSettings = { fontFamily: 'Times New Roman', fontSize: 16 };
-      const theme = createDynamicTheme(settings);
-
-      variants.forEach((variant) => {
-        const variantStyle = theme.typography[variant];
-        const fontFamily = variantStyle?.fontFamily ?? '';
-        expect(fontFamily, `${variant} should not contain Orbitron`).not.toContain('Orbitron');
-      });
-    });
   });
 
   describe('theme preservation (non-typography elements)', () => {

@@ -25,7 +25,7 @@ async def check_connection(db: MongoDBConnector = Depends(get_db)) -> Dict[str, 
             - connected (bool): Whether connection is established
             - database (str): Database name
             - collections_count (int): Number of collections
-            - server_info (dict): MongoDB server version and platform
+            - server_info (dict): MongoDB server version
             - ping_success (bool): Whether ping command succeeded
 
     Raises:

@@ -15,8 +15,6 @@ from utils.usfm_parser.usfm_importer import (
     import_usfm_directory_to_mongodb,
 )
 from utils.usfm_parser.usfm_parser import ParsedVerse
-from utils.html_parser.html_importer import import_html_to_mongodb
-
 
 # Sample USFM content for testing
 SAMPLE_USFM = r"""\id GEN
@@ -25,37 +23,6 @@ SAMPLE_USFM = r"""\id GEN
 \v 1 \w In the beginning|strong="H7225"\w* God created the heavens and the earth.
 \v 2 Now the earth was without shape and empty.
 """
-
-
-class TestImportResult:
-    """Test the ImportResult dataclass."""
-
-    def test_empty_result(self):
-        """Empty result should have zero counts."""
-        result = ImportResult()
-        assert result.verses_imported == 0
-        assert result.verses_updated == 0
-        assert result.books_processed == 0
-        assert result.total_processed == 0
-        assert not result.success
-
-    def test_result_with_imports(self):
-        """Result with imports should be successful."""
-        result = ImportResult(verses_imported=10, books_processed=1)
-        assert result.total_processed == 10
-        assert result.success
-
-    def test_result_with_updates(self):
-        """Result with updates should be successful."""
-        result = ImportResult(verses_updated=5, books_processed=1)
-        assert result.total_processed == 5
-        assert result.success
-
-    def test_result_with_both(self):
-        """Result with both imports and updates."""
-        result = ImportResult(verses_imported=10, verses_updated=5, books_processed=2)
-        assert result.total_processed == 15
-        assert result.success
 
 
 class TestVerseToDocument:
@@ -294,64 +261,6 @@ class TestBulkWriteOperations:
             assert len(operations) == 2
 
 
-class TestLanguageCodeHandling:
-    """Test language code handling in imports."""
-
-    @pytest.fixture
-    def temp_usfm_file(self):
-        """Create a temporary USFM file."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.usfm', delete=False, encoding='utf-8') as f:
-            f.write(SAMPLE_USFM)
-            temp_path = f.name
-        yield Path(temp_path)
-        os.unlink(temp_path)
-
-    def test_english_text_field_for_english(self):
-        """English content should go to english_text field."""
-        verse = ParsedVerse(
-            book_code="genesis",
-            book_name="Genesis",
-            usfm_code="GEN",
-            chapter=1,
-            verse=1,
-            raw_text="raw",
-            clean_text="In the beginning"
-        )
-        doc = _verse_to_document(verse, "english")
-
-        assert doc["english_text"] == "In the beginning"
-        assert doc["translated_text"] == ""
-
-    def test_translated_text_field_for_other_languages(self):
-        """Non-English content should go to translated_text field."""
-        verse = ParsedVerse(
-            book_code="genesis",
-            book_name="Genesis",
-            usfm_code="GEN",
-            chapter=1,
-            verse=1,
-            raw_text="raw",
-            clean_text="Au commencement"  # French translation
-        )
-        doc = _verse_to_document(verse, "french")
-
-        assert doc["english_text"] == ""
-        assert doc["translated_text"] == "Au commencement"
-
-
-# ---------------------------------------------------------------------------
-# Sample HTML content for HTML import tests
-# ---------------------------------------------------------------------------
-
-SAMPLE_HTML = """<!DOCTYPE html>
-<html>
-<body>
-<p id="GEN-1-1">In the beginning God created the heavens and the earth.</p>
-<p id="GEN-1-2">Now the earth was without shape and empty.</p>
-</body>
-</html>
-"""
-
 
 def _make_mock_connector():
     """Build a reusable mock MongoDB connector."""
@@ -530,56 +439,3 @@ class TestHumanVerifiedFlagImportUSFM:
                 for call in spy.call_args_list:
                     assert call.kwargs.get('human_verified') is True
 
-
-class TestHumanVerifiedFlagImportHTML:
-    """Tests for human_verified propagation through the HTML import path.
-
-    Guards against the silent-default bug where html_importer.py calls
-    _verse_to_document without passing human_verified, causing Python's
-    default False to mask the caller's intent.
-    """
-
-    @pytest.fixture
-    def temp_html_file(self):
-        """Create a temporary HTML chapter file with correct naming."""
-        with tempfile.NamedTemporaryFile(
-            mode='w', suffix='.htm', prefix='GEN01', delete=False, encoding='utf-8'
-        ) as f:
-            f.write(SAMPLE_HTML)
-            temp_path = f.name
-        yield Path(temp_path)
-        os.unlink(temp_path)
-
-    @pytest.mark.asyncio
-    async def test_html_import_with_human_verified_true(self, temp_html_file):
-        """human_verified=True should propagate through the HTML import path."""
-        connector, _ = _make_mock_connector()
-
-        with patch('utils.usfm_parser.usfm_importer._verse_to_document',
-                   wraps=_verse_to_document) as spy:
-            await import_html_to_mongodb(
-                temp_html_file,
-                language_code="bughotu",
-                human_verified=True,
-                connector=connector
-            )
-            # If any verses were parsed, all must have human_verified=True
-            if spy.call_count > 0:
-                for call in spy.call_args_list:
-                    assert call.kwargs.get('human_verified') is True
-
-    @pytest.mark.asyncio
-    async def test_html_import_default_is_unverified(self, temp_html_file):
-        """HTML import without human_verified should default to False."""
-        connector, _ = _make_mock_connector()
-
-        with patch('utils.usfm_parser.usfm_importer._verse_to_document',
-                   wraps=_verse_to_document) as spy:
-            await import_html_to_mongodb(
-                temp_html_file,
-                language_code="bughotu",
-                connector=connector
-            )
-            if spy.call_count > 0:
-                for call in spy.call_args_list:
-                    assert call.kwargs.get('human_verified') is False

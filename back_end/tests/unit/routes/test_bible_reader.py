@@ -205,3 +205,84 @@ class TestBibleBooksAlwaysReturns:
         # All should be has_data=False since no bible_books documents exist
         for book in data["books"]:
             assert book["has_data"] is False
+
+
+class TestClearVerseText:
+    """
+    Verify that clearing a verse's text un-verifies it.
+
+    Core bug: saving empty/whitespace text previously forced human_verified=True,
+    locking the UI checkbox in a checked-but-disabled state.
+    """
+
+    @pytest.mark.asyncio
+    async def test_empty_text_sets_human_verified_false(
+        self,
+        async_client: AsyncClient,
+        clean_test_language: str
+    ):
+        """Saving an empty string must return human_verified=False."""
+        response = await async_client.put(
+            f"/api/verses/{clean_test_language}/genesis/1/1",
+            json={"translated_text": ""}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["translated_text"] == ""
+        assert data["human_verified"] is False
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_normalizes_to_empty(
+        self,
+        async_client: AsyncClient,
+        clean_test_language: str
+    ):
+        """Whitespace-only text is stored as empty and sets human_verified=False."""
+        response = await async_client.put(
+            f"/api/verses/{clean_test_language}/genesis/1/1",
+            json={"translated_text": "   "}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["translated_text"] == ""
+        assert data["human_verified"] is False
+
+    @pytest.mark.asyncio
+    async def test_nonempty_text_still_sets_human_verified_true(
+        self,
+        async_client: AsyncClient,
+        clean_test_language: str
+    ):
+        """Non-empty save continues to set human_verified=True (regression guard)."""
+        response = await async_client.put(
+            f"/api/verses/{clean_test_language}/genesis/1/1",
+            json={"translated_text": "In the beginning"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["translated_text"] == "In the beginning"
+        assert data["human_verified"] is True
+
+    @pytest.mark.asyncio
+    async def test_clear_after_save_transitions_verified_to_false(
+        self,
+        async_client: AsyncClient,
+        clean_test_language: str
+    ):
+        """Save real text (verified=True), then clear it — DB must reflect verified=False."""
+        url = f"/api/verses/{clean_test_language}/genesis/1/1"
+
+        r1 = await async_client.put(url, json={"translated_text": "In the beginning"})
+        assert r1.status_code == 200
+        assert r1.json()["human_verified"] is True
+
+        r2 = await async_client.put(url, json={"translated_text": ""})
+        assert r2.status_code == 200
+        assert r2.json()["human_verified"] is False
+
+        # Confirm the write landed in the DB, not just the response shape
+        chapter = await async_client.get(f"/api/verses/{clean_test_language}/genesis/1")
+        assert chapter.status_code == 200
+        verse_one = next(v for v in chapter.json()["verses"] if v["verse"] == 1)
+        assert verse_one["translated_text"] == ""
+        assert verse_one["human_verified"] is False

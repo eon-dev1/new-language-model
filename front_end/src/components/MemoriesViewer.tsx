@@ -1,6 +1,6 @@
 // MemoriesViewer.tsx
 // Top-level Memories viewer. Owns AppBar ("Memories" title + back button).
-// Three MUI Tabs: Grammar / Notes / Correction Log.
+// Three MUI Tabs: Notes / Grammar / Correction Log.
 
 import React, { useState } from 'react';
 import {
@@ -27,7 +27,7 @@ interface MemoriesViewerProps {
 type MemoriesTab = 'grammar' | 'notes' | 'correction_log';
 
 export function MemoriesViewer({ languageCode, languageName, onBack }: MemoriesViewerProps) {
-  const [activeTab, setActiveTab] = useState<MemoriesTab>('grammar');
+  const [activeTab, setActiveTab] = useState<MemoriesTab>('notes');
 
   return (
     <Box
@@ -61,14 +61,14 @@ export function MemoriesViewer({ languageCode, languageName, onBack }: MemoriesV
             sx={{ borderBottom: 1, borderColor: 'rgba(255,255,255,0.2)' }}
           >
             <Tab
-              value="grammar"
-              label="Grammar"
-              sx={{ color: 'rgba(255,255,255,0.7)', '&.Mui-selected': { color: '#9C27B0' } }}
-            />
-            <Tab
               value="notes"
               label="Notes"
               sx={{ color: 'rgba(255,255,255,0.7)', '&.Mui-selected': { color: '#2196F3' } }}
+            />
+            <Tab
+              value="grammar"
+              label="Grammar"
+              sx={{ color: 'rgba(255,255,255,0.7)', '&.Mui-selected': { color: '#9C27B0' } }}
             />
             <Tab
               value="correction_log"
@@ -81,6 +81,9 @@ export function MemoriesViewer({ languageCode, languageName, onBack }: MemoriesV
 
       {/* Tab content — fills remaining height */}
       <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {activeTab === 'notes' && (
+          <NotesTab languageCode={languageCode} />
+        )}
         {activeTab === 'grammar' && (
           <GrammarViewer
             languageCode={languageCode}
@@ -88,9 +91,6 @@ export function MemoriesViewer({ languageCode, languageName, onBack }: MemoriesV
             onBack={() => {}}
             embeddedMode={true}
           />
-        )}
-        {activeTab === 'notes' && (
-          <NotesTab languageCode={languageCode} />
         )}
         {activeTab === 'correction_log' && (
           <CorrectionLogTab languageCode={languageCode} />

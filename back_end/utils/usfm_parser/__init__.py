@@ -62,7 +62,6 @@ from .usfm_importer import (
     ImportResult,
     import_usfm_to_mongodb,
     import_usfm_directory_to_mongodb,
-    update_bible_books_collection,
 )
 
 __all__ = [
@@ -89,5 +88,4 @@ __all__ = [
     "ImportResult",
     "import_usfm_to_mongodb",
     "import_usfm_directory_to_mongodb",
-    "update_bible_books_collection",
 ]

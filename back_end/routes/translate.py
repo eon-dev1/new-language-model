@@ -34,7 +34,7 @@ from db_connector.connection import get_mongodb_connector
 from shared.llm_tool_loop import run_tool_loop, get_context_window
 from shared.system_prompt import SYSTEM_PROMPT, load_skill, compose_prompt
 from shared.tool_registry import get_tools
-from utils.llm_provider import get_provider
+from utils.llm_provider import get_provider, ProviderConfigError
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -77,6 +77,7 @@ TRANSLATION_TOOL_NAMES = {
     "list_grammar_categories",
     "get_grammar_category",
     "get_word_index",
+    "get_phrase_context",
     "search_language_notes",
     "search_correction_log",
     "propose_verse_translation",   # Terminal write tool
@@ -189,12 +190,12 @@ async def translate_verse_stream(
             ):
                 yield line
 
-        except ValueError as e:
+        except ProviderConfigError as e:
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
-        except Exception as e:
-            logger.error(f"Translation stream error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'content': f'Server error: {e}'})}\n\n"
+        except Exception:
+            logger.exception("Translation stream error")
+            yield f"data: {json.dumps({'type': 'error', 'content': 'Server error'})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(
@@ -207,20 +208,6 @@ async def translate_verse_stream(
         },
     )
 
-
-def _wrap_with_messages_snapshot(tool_loop_gen, messages: list):
-    """
-    Async generator that intercepts tool_approval events from run_tool_loop
-    and injects messages_snapshot into them.
-
-    Called by both batch endpoints. messages is the same list passed to
-    run_tool_loop — it is mutated in-place by the loop, so by the time
-    tool_approval is yielded, the list already contains the complete conversation.
-
-    run_tool_loop itself is NOT modified — this wrapper keeps chat route
-    tool_approval events clean (no 50-100KB message history appended).
-    """
-    return _messages_snapshot_gen(tool_loop_gen, messages)
 
 
 async def _messages_snapshot_gen(tool_loop_gen, messages: list):
@@ -281,12 +268,12 @@ async def translate_batch_stream(
             ):
                 yield line
 
-        except ValueError as e:
+        except ProviderConfigError as e:
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
-        except Exception as e:
-            logger.error(f"Batch translation stream error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'content': f'Server error: {e}'})}\n\n"
+        except Exception:
+            logger.exception("Batch translation stream error")
+            yield f"data: {json.dumps({'type': 'error', 'content': 'Server error'})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(
@@ -355,12 +342,12 @@ async def translate_batch_resume(
             ):
                 yield line
 
-        except ValueError as e:
+        except ProviderConfigError as e:
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
-        except Exception as e:
-            logger.error(f"Batch resume stream error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'content': f'Server error: {e}'})}\n\n"
+        except Exception:
+            logger.exception("Batch resume stream error")
+            yield f"data: {json.dumps({'type': 'error', 'content': 'Server error'})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(

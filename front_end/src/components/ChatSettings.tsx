@@ -16,13 +16,6 @@ interface Props {
   onBack: () => void;
 }
 
-const ANTHROPIC_MODELS = [
-  { id: 'claude-opus-4-6', label: 'Opus 4.6' },
-  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
-];
-const VALID_MODEL_IDS = new Set(ANTHROPIC_MODELS.map(m => m.id));
-
 const OPENROUTER_MODELS = [
   { id: 'anthropic/claude-opus-4.6',   label: 'Opus 4.6',      group: 'Anthropic' },
   { id: 'anthropic/claude-sonnet-4.6', label: 'Sonnet 4.6',    group: 'Anthropic' },
@@ -43,12 +36,9 @@ export const ChatSettings: React.FC<Props> = ({ onBack }) => {
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   // Form state
-  const [provider, setProvider] = useState('anthropic');
-  const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('claude-sonnet-4-6');
+  const [provider, setProvider] = useState('openrouter');
   const [localUrl, setLocalUrl] = useState('http://127.0.0.1:8080');
   const [localModel, setLocalModel] = useState('default');
-  const [showApiKey, setShowApiKey] = useState(false);
   const [openrouterKey, setOpenrouterKey] = useState('');
   const [openrouterModel, setOpenrouterModel] = useState('anthropic/claude-sonnet-4.6');
   const [showOpenrouterKey, setShowOpenrouterKey] = useState(false);
@@ -60,7 +50,6 @@ export const ChatSettings: React.FC<Props> = ({ onBack }) => {
         const cfg = await fetchChatConfig();
         setConfig(cfg);
         setProvider(cfg.llm_provider);
-        setModel(VALID_MODEL_IDS.has(cfg.anthropic_model) ? cfg.anthropic_model : 'claude-sonnet-4-6');
         setLocalUrl(cfg.local_base_url);
         setLocalModel(cfg.local_model);
         setOpenrouterModel(VALID_OPENROUTER_MODEL_IDS.has(cfg.openrouter_model) ? cfg.openrouter_model : 'anthropic/claude-sonnet-4.6');
@@ -81,21 +70,16 @@ export const ChatSettings: React.FC<Props> = ({ onBack }) => {
     try {
       const updates: Record<string, string | boolean> = {
         llm_provider: provider,
-        anthropic_model: model,
         local_base_url: localUrl,
         local_model: localModel,
         openrouter_model: openrouterModel,
         thinking_enabled: thinkingEnabled,
       };
-      if (apiKey) {
-        updates.anthropic_api_key = apiKey;
-      }
       if (openrouterKey) {
         updates.openrouter_api_key = openrouterKey;
       }
       await saveChatConfig(updates);
       setSuccess(true);
-      setApiKey('');
       setOpenrouterKey('');
       // Refresh config to get updated preview
       const cfg = await fetchChatConfig();
@@ -137,44 +121,10 @@ export const ChatSettings: React.FC<Props> = ({ onBack }) => {
             label="Provider"
             onChange={e => setProvider(e.target.value)}
           >
-            <MenuItem value="anthropic">Anthropic API</MenuItem>
             <MenuItem value="local">Local LLM</MenuItem>
             <MenuItem value="openrouter">OpenRouter</MenuItem>
           </Select>
         </FormControl>
-
-        {provider === 'anthropic' && (
-          <>
-            <TextField
-              fullWidth
-              size="small"
-              label={config?.has_api_key && !apiKey ? `API Key (saved: ${config.api_key_preview})` : 'API Key'}
-              type={showApiKey ? 'text' : 'password'}
-              value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
-              placeholder={config?.has_api_key ? 'Enter new key to replace' : 'Enter API key'}
-              InputProps={{
-                endAdornment: (
-                  <IconButton size="small" onClick={() => setShowApiKey(!showApiKey)}>
-                    {showApiKey ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
-                  </IconButton>
-                ),
-              }}
-            />
-            <FormControl fullWidth size="small">
-              <InputLabel>Model</InputLabel>
-              <Select
-                value={model}
-                label="Model"
-                onChange={e => setModel(e.target.value)}
-              >
-                {ANTHROPIC_MODELS.map(m => (
-                  <MenuItem key={m.id} value={m.id}>{m.label}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </>
-        )}
 
         {provider === 'openrouter' && (
           <>
