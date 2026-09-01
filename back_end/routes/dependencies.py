@@ -29,8 +29,12 @@ def api_error(operation: str, e: Exception, status: int = 500) -> HTTPException:
     Returns:
         HTTPException ready to be raised
     """
-    logger.error(f"{operation} failed: {e}")
-    return HTTPException(status_code=status, detail=f"{operation} failed: {str(e)}")
+    # exc_info=e, not logger.exception(): the exception is a parameter here, not
+    # ambient. logger.exception() reads sys.exc_info(), which is only populated
+    # inside an except block — a caller outside one would silently log
+    # "NoneType: None" and lose the traceback.
+    logger.error(f"{operation} failed", exc_info=e)
+    return HTTPException(status_code=status, detail=f"{operation} failed")
 
 
 async def get_db() -> AsyncGenerator[MongoDBConnector, None]:

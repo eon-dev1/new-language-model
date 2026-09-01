@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import React from 'react';
@@ -14,16 +14,28 @@ import { SettingsDialog } from '../../src/renderer/components/SettingsDialog';
 import { SettingsProvider, useSettings } from '../../src/renderer/contexts/SettingsContext';
 import { createDynamicTheme } from '../../src/renderer/theme/createDynamicTheme';
 
-// Helper to wrap component with required providers
-const renderWithProviders = (ui: React.ReactElement) => {
+vi.mock('../../src/renderer/api', () => ({
+  fetchLanguages: vi.fn().mockResolvedValue([]),
+  rebuildWordIndex: vi.fn(),
+  selectFolder: vi.fn(),
+  exportUsfm: vi.fn(),
+  backupDatabase: vi.fn(),
+}));
+
+// Helper to wrap component with required providers.
+// Awaits a flush of the SettingsDialog's fetchLanguages().then(...) microtask so
+// that state update lands inside act() instead of leaking past the test body.
+const renderWithProviders = async (ui: React.ReactElement) => {
   const theme = createDynamicTheme({ fontFamily: 'system-ui', fontSize: 16 });
-  return render(
+  const result = render(
     <SettingsProvider>
       <ThemeProvider theme={theme}>
         {ui}
       </ThemeProvider>
     </SettingsProvider>
   );
+  await act(async () => {});
+  return result;
 };
 
 // Helper component to read and display current settings
@@ -43,9 +55,9 @@ describe('SettingsDialog', () => {
   });
 
   describe('visibility', () => {
-    it('renders dialog content when open=true', () => {
+    it('renders dialog content when open=true', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <SettingsDialog open={true} onClose={onClose} />
       );
 
@@ -53,9 +65,9 @@ describe('SettingsDialog', () => {
       expect(screen.getByText('Settings')).toBeInTheDocument();
     });
 
-    it('does not render dialog content when open=false', () => {
+    it('does not render dialog content when open=false', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <SettingsDialog open={false} onClose={onClose} />
       );
 
@@ -64,9 +76,9 @@ describe('SettingsDialog', () => {
   });
 
   describe('font family dropdown', () => {
-    it('renders font family select with label', () => {
+    it('renders font family select with label', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <SettingsDialog open={true} onClose={onClose} />
       );
 
@@ -75,7 +87,7 @@ describe('SettingsDialog', () => {
 
     it('has System Default option', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <SettingsDialog open={true} onClose={onClose} />
       );
 
@@ -89,7 +101,7 @@ describe('SettingsDialog', () => {
 
     it('has Times New Roman option', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <SettingsDialog open={true} onClose={onClose} />
       );
 
@@ -101,18 +113,18 @@ describe('SettingsDialog', () => {
   });
 
   describe('font size slider', () => {
-    it('renders font size slider', () => {
+    it('renders font size slider', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <SettingsDialog open={true} onClose={onClose} />
       );
 
       expect(screen.getByRole('slider')).toBeInTheDocument();
     });
 
-    it('slider has min value of 12', () => {
+    it('slider has min value of 12', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <SettingsDialog open={true} onClose={onClose} />
       );
 
@@ -120,9 +132,9 @@ describe('SettingsDialog', () => {
       expect(slider).toHaveAttribute('aria-valuemin', '12');
     });
 
-    it('slider has max value of 24', () => {
+    it('slider has max value of 24', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <SettingsDialog open={true} onClose={onClose} />
       );
 
@@ -130,9 +142,9 @@ describe('SettingsDialog', () => {
       expect(slider).toHaveAttribute('aria-valuemax', '24');
     });
 
-    it('displays current font size value', () => {
+    it('displays current font size value', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <SettingsDialog open={true} onClose={onClose} />
       );
 
@@ -144,7 +156,7 @@ describe('SettingsDialog', () => {
   describe('settings updates', () => {
     it('changing font family updates context', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <>
           <SettingsDialog open={true} onClose={onClose} />
           <SettingsReader />
@@ -165,7 +177,7 @@ describe('SettingsDialog', () => {
 
     it('changing font size updates context', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <>
           <SettingsDialog open={true} onClose={onClose} />
           <SettingsReader />
@@ -185,9 +197,9 @@ describe('SettingsDialog', () => {
   });
 
   describe('reset button', () => {
-    it('renders reset button', () => {
+    it('renders reset button', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <SettingsDialog open={true} onClose={onClose} />
       );
 
@@ -202,7 +214,7 @@ describe('SettingsDialog', () => {
       }));
 
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <>
           <SettingsDialog open={true} onClose={onClose} />
           <SettingsReader />
@@ -225,7 +237,7 @@ describe('SettingsDialog', () => {
   describe('close functionality', () => {
     it('calls onClose when close button is clicked', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <SettingsDialog open={true} onClose={onClose} />
       );
 
@@ -238,9 +250,9 @@ describe('SettingsDialog', () => {
   });
 
   describe('preview', () => {
-    it('shows preview text', () => {
+    it('shows preview text', async () => {
       const onClose = vi.fn();
-      renderWithProviders(
+      await renderWithProviders(
         <SettingsDialog open={true} onClose={onClose} />
       );
 

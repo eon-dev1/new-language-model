@@ -149,8 +149,8 @@ class TestGetChapter:
 
         result = await get_chapter(mock_mcp_db, "english", "GENESIS", 1)
 
-        # Should work, not error
-        assert "verses" in result or "error" not in result
+        assert "verses" in result
+        assert "error" not in result
 
 
 

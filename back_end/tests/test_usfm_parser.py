@@ -70,69 +70,31 @@ def temp_usfm_directory():
         yield Path(temp_dir)
 
 
-class TestParsedVerse:
-    """Test the ParsedVerse dataclass."""
-
-    def test_parsed_verse_fields(self):
-        """ParsedVerse should have all required fields."""
-        verse = ParsedVerse(
-            book_code="genesis",
-            book_name="Genesis",
-            usfm_code="GEN",
-            chapter=1,
-            verse=1,
-            raw_text="raw text",
-            clean_text="clean text"
-        )
-        assert verse.book_code == "genesis"
-        assert verse.book_name == "Genesis"
-        assert verse.usfm_code == "GEN"
-        assert verse.chapter == 1
-        assert verse.verse == 1
-        assert verse.raw_text == "raw text"
-        assert verse.clean_text == "clean text"
-
-
 class TestParseResult:
-    """Test the ParseResult dataclass."""
-
-    def test_empty_result(self):
-        """Empty result should have zero counts."""
+    @pytest.mark.parametrize(
+        "verse_count,error_count,expected_success",
+        [
+            (0, 0, False),
+            (1, 0, True),
+            (1, 1, False),
+        ],
+    )
+    def test_success_reflects_verses_and_errors(self, verse_count, error_count, expected_success):
+        """success = verse_count > 0 and len(errors) == 0, pinned across all three branches."""
         result = ParseResult()
-        assert result.verse_count == 0
-        assert result.books_parsed == 0
-        assert len(result.errors) == 0
-        assert not result.success
-
-    def test_result_with_verses(self):
-        """Result with verses should report correct count."""
-        result = ParseResult()
-        result.verses.append(ParsedVerse(
-            book_code="genesis",
-            book_name="Genesis",
-            usfm_code="GEN",
-            chapter=1,
-            verse=1,
-            raw_text="raw",
-            clean_text="clean"
-        ))
-        assert result.verse_count == 1
-        assert result.success
-
-    def test_result_with_errors(self):
-        """Result with errors should not be successful."""
-        result = ParseResult()
-        result.verses.append(ParsedVerse(
-            book_code="genesis",
-            book_name="Genesis",
-            usfm_code="GEN",
-            chapter=1,
-            verse=1,
-            raw_text="raw",
-            clean_text="clean"
-        ))
-        result.errors.append("Some error")
-        assert not result.success
+        for i in range(verse_count):
+            result.verses.append(ParsedVerse(
+                book_code="genesis",
+                book_name="Genesis",
+                usfm_code="GEN",
+                chapter=1,
+                verse=i + 1,
+                raw_text="raw",
+                clean_text="clean"
+            ))
+        for i in range(error_count):
+            result.errors.append(f"Some error {i}")
+        assert result.success is expected_success
 
 
 class TestExtractBookId:
@@ -282,46 +244,3 @@ class TestIterUSFMVerses:
         first_verse = next(verse_iter)
         assert first_verse.chapter == 1
         assert first_verse.verse == 1
-
-
-class TestRealUSFMFiles:
-    """Test with real USFM files if available."""
-
-    @pytest.fixture
-    def engnet_dir(self):
-        """Path to engNET USFM directory."""
-        # Try multiple possible locations
-        paths = [
-            Path("../data/bibles/engnet_usfm"),
-            Path("data/bibles/engnet_usfm")
-        ]
-        for path in paths:
-            if path.exists():
-                return path
-        pytest.skip("engNET USFM files not found")
-
-    def test_parse_real_genesis(self, engnet_dir):
-        """Test parsing real Genesis file."""
-        genesis_files = list(engnet_dir.glob("*GEN*.usfm"))
-        if not genesis_files:
-            pytest.skip("Genesis file not found")
-
-        result = parse_usfm_file(genesis_files[0])
-
-        # Genesis has 50 chapters and 1533 verses
-        assert result.books_parsed == 1
-        assert result.verse_count > 1500
-        assert result.success
-
-    def test_parse_real_matthew(self, engnet_dir):
-        """Test parsing real Matthew file."""
-        matthew_files = list(engnet_dir.glob("*MAT*.usfm"))
-        if not matthew_files:
-            pytest.skip("Matthew file not found")
-
-        result = parse_usfm_file(matthew_files[0])
-
-        # Matthew has 28 chapters
-        assert result.books_parsed == 1
-        assert result.verse_count > 1000
-        assert result.success

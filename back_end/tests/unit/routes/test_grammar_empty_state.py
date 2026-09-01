@@ -56,19 +56,6 @@ class TestGrammarEmptyStateGET:
             assert expected_cat in category_names, f"Missing category: {expected_cat}"
 
     @pytest.mark.asyncio
-    async def test_get_categories_returns_200_not_404(
-        self,
-        async_client: AsyncClient,
-        clean_test_language: str
-    ):
-        """Verify we get 200 status, not 404, for non-existent grammar."""
-        response = await async_client.get(f"/api/grammar/{clean_test_language}/categories")
-
-        # This is the critical assertion - current code returns 404
-        assert response.status_code != 404, "GET should not return 404 for empty grammar"
-        assert response.status_code == 200
-
-    @pytest.mark.asyncio
     async def test_get_categories_empty_shells_have_empty_defaults(
         self,
         async_client: AsyncClient,

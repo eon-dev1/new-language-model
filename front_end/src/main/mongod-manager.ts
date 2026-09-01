@@ -102,6 +102,16 @@ async function _doStart(): Promise<boolean> {
     // 1. Create data directory
     fs.mkdirSync(dbPath, { recursive: true });
 
+    if (process.platform === 'darwin') {
+      // Spotlight re-indexes WiredTiger's constant writes → mdworker CPU churn.
+      // The .metadata_never_index sentinel excludes this directory from Spotlight.
+      try {
+        fs.closeSync(fs.openSync(path.join(dbPath, '.metadata_never_index'), 'a'));
+      } catch {
+        // Non-fatal: worst case, mdworker re-indexes. Don't crash mongod startup over this.
+      }
+    }
+
     // 2. TCP pre-check: if port is already accepting connections, a mongod is
     //    already running. Fast-path return — do NOT touch WiredTiger.lock.
     //    (Deleting the lock of a running mongod would allow a second instance
@@ -119,12 +129,15 @@ async function _doStart(): Promise<boolean> {
     }
 
     // 4. Spawn mongod
-    // --noauth was removed in MongoDB 6+. Auth is off by default without --auth.
+    // Enforcement is verified by db_connector/auth_probe.py, run from both
+    // the backend lifespan (main.py) and the pytest session fixture
+    // (conftest.py) — this process has no MongoDB driver to check it itself.
     console.log('[Mongod Manager] Spawning mongod...');
     const proc = spawn(binPath, [
       '--port',     String(MONGOD_PORT),
       '--dbpath',   dbPath,
       '--bind_ip',  '127.0.0.1',
+      '--auth',
     ], {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,

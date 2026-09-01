@@ -1,17 +1,15 @@
 # Bible Import Documentation
 
-This document covers importing Bible data into the NLM platform from various file formats.
+This document covers importing Bible data into the NLM platform.
 
 ## Overview
 
-The NLM backend supports two import formats:
-- **USFM** (Unified Standard Format Markers) - Standard Bible text format
-- **HTML** - Custom HTML format used by some translation projects
+The NLM backend supports importing Bible text via **USFM** (Unified Standard Format Markers), the standard Bible text format.
 
-Both methods:
-- Support upsert behavior (safe to re-import)
-- Create/update the language document automatically
-- Track import statistics (inserted vs updated)
+Import:
+- Supports upsert behavior (safe to re-import)
+- Creates/updates the language document automatically
+- Tracks import statistics (inserted vs updated)
 
 ---
 
@@ -117,145 +115,6 @@ python -m utils.usfm_parser.usfm_importer \
 
 ---
 
-## HTML Import
-
-### Endpoint
-
-```
-POST /api/import-html-bible
-```
-
-### Request Schema
-
-```json
-{
-  "language_code": "bughotu",
-  "language_name": "Bughotu",
-  "html_directory": "/path/to/html/files"
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `language_code` | string | Yes | Unique identifier |
-| `language_name` | string | Yes | Display name |
-| `html_directory` | string | Yes | Absolute path to directory containing HTML files |
-| `human_verified` | boolean | No | Mark all imported verses as pre-verified (default: `false`) |
-
-### Response Schema
-
-```json
-{
-  "success": true,
-  "language_code": "bughotu",
-  "message": "Imported 7957 verses from 260 chapters",
-  "verses_imported": 7957,
-  "verses_updated": 0,
-  "chapters_processed": 260,
-  "is_reimport": false
-}
-```
-
-### Required File Naming Pattern
-
-HTML files **must** follow this naming convention:
-
-```
-{BOOK_CODE}{CHAPTER}.htm
-```
-
-Where:
-- `{BOOK_CODE}` is a 3-character USFM book code (case-insensitive)
-- `{CHAPTER}` is a 2-digit chapter number (01-99)
-- Extension must be `.htm`
-
-**Regex pattern**: `^([A-Z0-9]{3})(\d{2})\.htm$`
-
-### Examples
-
-| Filename | Book | Chapter |
-|----------|------|---------|
-| `GEN01.htm` | Genesis | 1 |
-| `GEN50.htm` | Genesis | 50 |
-| `MAT01.htm` | Matthew | 1 |
-| `JHN03.htm` | John | 3 |
-| `1CO13.htm` | 1 Corinthians | 13 |
-| `REV22.htm` | Revelation | 22 |
-
-### Directory Structure
-
-```
-html_directory/
-├── GEN00.htm    # Introduction (SKIPPED)
-├── GEN01.htm    # Genesis chapter 1
-├── GEN02.htm    # Genesis chapter 2
-├── ...
-├── GEN50.htm    # Genesis chapter 50
-├── EXO00.htm    # Introduction (SKIPPED)
-├── EXO01.htm    # Exodus chapter 1
-├── ...
-└── REV22.htm    # Revelation chapter 22
-```
-
-**Note**: Chapter 00 files (introductions) are automatically skipped.
-
-### Standard USFM Book Codes
-
-| Code | Book | Code | Book |
-|------|------|------|------|
-| GEN | Genesis | MAT | Matthew |
-| EXO | Exodus | MRK | Mark |
-| LEV | Leviticus | LUK | Luke |
-| NUM | Numbers | JHN | John |
-| DEU | Deuteronomy | ACT | Acts |
-| JOS | Joshua | ROM | Romans |
-| JDG | Judges | 1CO | 1 Corinthians |
-| RUT | Ruth | 2CO | 2 Corinthians |
-| 1SA | 1 Samuel | GAL | Galatians |
-| 2SA | 2 Samuel | EPH | Ephesians |
-| 1KI | 1 Kings | PHP | Philippians |
-| 2KI | 2 Kings | COL | Colossians |
-| 1CH | 1 Chronicles | 1TH | 1 Thessalonians |
-| 2CH | 2 Chronicles | 2TH | 2 Thessalonians |
-| EZR | Ezra | 1TI | 1 Timothy |
-| NEH | Nehemiah | 2TI | 2 Timothy |
-| EST | Esther | TIT | Titus |
-| JOB | Job | PHM | Philemon |
-| PSA | Psalms | HEB | Hebrews |
-| PRO | Proverbs | JAS | James |
-| ECC | Ecclesiastes | 1PE | 1 Peter |
-| SNG | Song of Solomon | 2PE | 2 Peter |
-| ISA | Isaiah | 1JN | 1 John |
-| JER | Jeremiah | 2JN | 2 John |
-| LAM | Lamentations | 3JN | 3 John |
-| EZK | Ezekiel | JUD | Jude |
-| DAN | Daniel | REV | Revelation |
-| HOS | Hosea | | |
-| JOL | Joel | | |
-| AMO | Amos | | |
-| OBA | Obadiah | | |
-| JON | Jonah | | |
-| MIC | Micah | | |
-| NAM | Nahum | | |
-| HAB | Habakkuk | | |
-| ZEP | Zephaniah | | |
-| HAG | Haggai | | |
-| ZEC | Zechariah | | |
-| MAL | Malachi | | |
-
-### CLI Usage
-
-```bash
-cd back_end
-
-# Import HTML Bible
-python -m utils.html_parser.html_importer \
-    ../data/bibles/bgt_html/ \
-    bughotu
-```
-
----
-
 ## Import Behavior
 
 ### Verification Status at Import
@@ -336,7 +195,6 @@ For English imports, text goes to `english_text` instead of `translated_text`. T
 |-------|-------|----------|
 | "Directory not found" | Invalid path | Check the path exists |
 | "No USFM files found" | Wrong directory or extension | Verify file extensions |
-| "No valid HTML chapter files found" | Files don't match naming pattern | Rename files to `{CODE}{NN}.htm` |
 
 ### Partial Import Handling
 
@@ -350,6 +208,5 @@ If an import fails partway through:
 ## Best Practices
 
 1. **Use absolute paths** for directory arguments
-2. **Verify file naming** before HTML imports
-3. **Check response statistics** to confirm expected verse counts
-4. **Re-import is safe** - run again if something seems wrong
+2. **Check response statistics** to confirm expected verse counts
+3. **Re-import is safe** - run again if something seems wrong

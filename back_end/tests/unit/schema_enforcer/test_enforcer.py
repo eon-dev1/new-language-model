@@ -288,3 +288,39 @@ class TestSampleValidation:
         report = await enforcer.enforce()  # Should not raise
         # Just verify it completes without error
         assert report is not None
+
+
+class TestSampleValidationHonestSkip:
+    """A sample-cursor exception must be logged, not silently swallowed."""
+
+    @pytest.mark.asyncio
+    async def test_sample_exception_is_logged_and_loop_continues(self, mock_db, caplog):
+        """bible_texts aggregate() raising is logged; other collections still validate."""
+        from utils.schema_enforcer.enforcer import SchemaEnforcer
+
+        mock_db._collection_cache["bible_texts"] = AsyncMock()
+        mock_db._collection_cache["bible_texts"].index_information = AsyncMock(
+            return_value={"_id_": {"key": [("_id", 1)]}}
+        )
+        mock_db._collection_cache["bible_texts"].aggregate = MagicMock(
+            side_effect=RuntimeError("mongod hiccup")
+        )
+
+        # dictionaries still validates normally after bible_texts blows up.
+        mock_db._collection_cache["dictionaries"] = AsyncMock()
+        mock_db._collection_cache["dictionaries"].index_information = AsyncMock(
+            return_value={"_id_": {"key": [("_id", 1)]}, "dict_lookup": {}}
+        )
+        mock_db._collection_cache["dictionaries"].aggregate = MagicMock(
+            return_value=AsyncIterator([{"language_code": "test"}])  # missing required fields
+        )
+
+        enforcer = SchemaEnforcer(mock_db, dry_run=True)
+        with caplog.at_level("WARNING"):
+            report = await enforcer.enforce()
+
+        assert any(
+            "sample validation skipped for bible_texts" in rec.message
+            for rec in caplog.records
+        )
+        assert any("dictionaries" in w for w in report.warnings)

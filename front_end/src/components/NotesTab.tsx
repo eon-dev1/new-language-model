@@ -26,6 +26,8 @@ interface NotesTabProps {
   languageCode: string;
 }
 
+const TITLE_MAX = 200;
+
 export function NotesTab({ languageCode }: NotesTabProps) {
   const [notes, setNotes] = useState<LanguageNote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,11 +35,13 @@ export function NotesTab({ languageCode }: NotesTabProps) {
 
   // Add form state
   const [addingNew, setAddingNew] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
   const [newText, setNewText] = useState('');
   const [addSaving, setAddSaving] = useState(false);
 
   // Inline edit state
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
   const [editText, setEditText] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
@@ -60,18 +64,22 @@ export function NotesTab({ languageCode }: NotesTabProps) {
   };
 
   const handleAdd = async () => {
-    if (!newText.trim()) return;
+    if (!newTitle.trim() || !newText.trim()) return;
     setAddSaving(true);
     try {
-      const result = await addNote(languageCode, newText.trim());
+      const trimmedTitle = newTitle.trim();
+      const trimmedText = newText.trim();
+      const result = await addNote(languageCode, trimmedTitle, trimmedText);
       const now = new Date().toISOString();
       const newNote: LanguageNote = {
         id: result.note_id,
-        text: newText.trim(),
+        title: trimmedTitle,
+        text: trimmedText,
         created_at: now,
         updated_at: now,
       };
       setNotes(prev => [...prev, newNote]);
+      setNewTitle('');
       setNewText('');
       setAddingNew(false);
     } catch (err) {
@@ -83,18 +91,21 @@ export function NotesTab({ languageCode }: NotesTabProps) {
 
   const handleStartEdit = (note: LanguageNote) => {
     setEditingId(note.id);
+    setEditTitle(note.title);
     setEditText(note.text);
   };
 
   const handleSaveEdit = async (noteId: string) => {
-    if (!editText.trim()) return;
+    if (!editTitle.trim() || !editText.trim()) return;
     setEditSaving(true);
     try {
-      await updateNote(languageCode, noteId, editText.trim());
+      const trimmedTitle = editTitle.trim();
+      const trimmedText = editText.trim();
+      await updateNote(languageCode, noteId, trimmedTitle, trimmedText);
       setNotes(prev =>
         prev.map(n =>
           n.id === noteId
-            ? { ...n, text: editText.trim(), updated_at: new Date().toISOString() }
+            ? { ...n, title: trimmedTitle, text: trimmedText, updated_at: new Date().toISOString() }
             : n
         )
       );
@@ -108,6 +119,7 @@ export function NotesTab({ languageCode }: NotesTabProps) {
 
   const handleCancelEdit = () => {
     setEditingId(null);
+    setEditTitle('');
     setEditText('');
   };
 
@@ -157,14 +169,25 @@ export function NotesTab({ languageCode }: NotesTabProps) {
                 <Box>
                   <TextField
                     fullWidth
+                    label="Title"
+                    value={editTitle}
+                    onChange={e => setEditTitle(e.target.value)}
+                    inputProps={{ maxLength: TITLE_MAX }}
+                    sx={{ mb: 1 }}
+                    InputProps={{ sx: { color: 'white' } }}
+                    InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.7)' } }}
+                    autoFocus
+                  />
+                  <TextField
+                    fullWidth
                     multiline
                     rows={3}
+                    label="Body"
                     value={editText}
                     onChange={e => setEditText(e.target.value)}
                     sx={{ mb: 1 }}
                     InputProps={{ sx: { color: 'white' } }}
                     InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.7)' } }}
-                    autoFocus
                   />
                   <Box sx={{ display: 'flex', gap: 1 }}>
                     <Button
@@ -172,7 +195,7 @@ export function NotesTab({ languageCode }: NotesTabProps) {
                       variant="contained"
                       startIcon={editSaving ? <CircularProgress size={14} /> : <Save />}
                       onClick={() => handleSaveEdit(note.id)}
-                      disabled={editSaving || !editText.trim()}
+                      disabled={editSaving || !editTitle.trim() || !editText.trim()}
                     >
                       Save
                     </Button>
@@ -190,6 +213,12 @@ export function NotesTab({ languageCode }: NotesTabProps) {
                 </Box>
               ) : (
                 <Box>
+                  <Typography
+                    variant="subtitle1"
+                    sx={{ color: 'white', fontWeight: 600, mb: 0.5, whiteSpace: 'pre-wrap' }}
+                  >
+                    {note.title}
+                  </Typography>
                   <Typography sx={{ color: 'white', mb: 1.5, whiteSpace: 'pre-wrap' }}>
                     {note.text}
                   </Typography>
@@ -224,16 +253,27 @@ export function NotesTab({ languageCode }: NotesTabProps) {
             <Paper sx={{ p: 2, mb: 2, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 2 }}>
               <TextField
                 fullWidth
+                label="Title"
+                placeholder="Short heading…"
+                value={newTitle}
+                onChange={e => setNewTitle(e.target.value)}
+                inputProps={{ maxLength: TITLE_MAX }}
+                sx={{ mb: 1 }}
+                InputProps={{ sx: { color: 'white' } }}
+                InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.7)' } }}
+                autoFocus
+              />
+              <TextField
+                fullWidth
                 multiline
                 rows={3}
-                label="Note"
+                label="Body"
                 placeholder="Enter your note..."
                 value={newText}
                 onChange={e => setNewText(e.target.value)}
                 sx={{ mb: 1 }}
                 InputProps={{ sx: { color: 'white' } }}
                 InputLabelProps={{ sx: { color: 'rgba(255,255,255,0.7)' } }}
-                autoFocus
               />
               <Box sx={{ display: 'flex', gap: 1 }}>
                 <Button
@@ -241,7 +281,7 @@ export function NotesTab({ languageCode }: NotesTabProps) {
                   variant="contained"
                   startIcon={addSaving ? <CircularProgress size={14} /> : <Save />}
                   onClick={handleAdd}
-                  disabled={addSaving || !newText.trim()}
+                  disabled={addSaving || !newTitle.trim() || !newText.trim()}
                 >
                   Save
                 </Button>
@@ -249,7 +289,7 @@ export function NotesTab({ languageCode }: NotesTabProps) {
                   size="small"
                   variant="outlined"
                   startIcon={<Cancel />}
-                  onClick={() => { setAddingNew(false); setNewText(''); }}
+                  onClick={() => { setAddingNew(false); setNewTitle(''); setNewText(''); }}
                   disabled={addSaving}
                   sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}
                 >

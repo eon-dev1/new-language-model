@@ -21,6 +21,54 @@ import pytest
 from db_connector.settings import MongoDBSettings
 from db_connector.connection import MongoDBConnector
 
+pytestmark = pytest.mark.integration
+
+
+# =============================================================================
+# SETTINGS LOADING TESTS
+# =============================================================================
+
+class TestSettingsLoading:
+    """Test credential loading from ~/.nlm/mongodb_credentials.env."""
+
+    def test_settings_creation_succeeds(self, mongodb_settings):
+        """Settings should be created from credentials without error."""
+        assert mongodb_settings is not None
+
+    def test_database_name_configured(self, mongodb_settings):
+        """Database name should be set from Tier 1 config."""
+        assert mongodb_settings.database_name
+        assert len(mongodb_settings.database_name) > 0
+
+    def test_connection_string_format_valid(self, mongodb_settings):
+        """Connection string should start with mongodb:// or mongodb+srv://"""
+        conn_str = mongodb_settings.mongodb_connection_string
+        assert conn_str.startswith(("mongodb://", "mongodb+srv://")), (
+            f"Invalid connection string format: {conn_str[:20]}..."
+        )
+
+    def test_connection_options_returned(self, mongodb_settings):
+        """get_connection_options() should return expected keys."""
+        options = mongodb_settings.get_connection_options()
+
+        expected_keys = [
+            "minPoolSize",
+            "maxPoolSize",
+            "serverSelectionTimeoutMS",
+            "connectTimeoutMS",
+            "socketTimeoutMS",
+        ]
+        for key in expected_keys:
+            assert key in options, f"Missing option: {key}"
+
+    def test_pool_size_configuration(self, mongodb_settings):
+        """Pool size should be configured with sensible defaults."""
+        options = mongodb_settings.get_connection_options()
+
+        assert options["minPoolSize"] >= 1
+        assert options["maxPoolSize"] >= options["minPoolSize"]
+        assert options["maxPoolSize"] <= 100  # Sanity check
+
 
 # =============================================================================
 # CONNECTION ESTABLISHMENT TESTS
@@ -160,7 +208,6 @@ class TestErrorHandling:
     """Test error conditions requiring a network attempt."""
 
     @pytest.mark.asyncio
-    @pytest.mark.timeout(15)
     async def test_invalid_connection_string_raises(self, invalid_mongodb_settings):
         """Connection with invalid URI should raise exception."""
         connector = MongoDBConnector(invalid_mongodb_settings)

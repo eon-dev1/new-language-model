@@ -303,3 +303,91 @@ class TestUpsertDictionaryEntries:
                     "examples": ["shalom aleichem"]}]
         result = await upsert_dictionary_entries(mock_mcp_db, "heb", entries)
         assert result.get("created", 0) + result.get("updated", 0) >= 1
+
+    @pytest.mark.asyncio
+    async def test_upsert_sets_human_verified_on_new_dictionary_doc(self, mock_mcp_db):
+        """Regression: entries in a brand-new dictionary doc (insert_one path) come
+        out human_verified=True — this tool is only reachable via the chat approval
+        flow, so a write reaching persistence has already been human-reviewed."""
+        from mcp_server.tools.dictionary import upsert_dictionary_entries
+
+        # "english" is a valid language with no dictionary doc yet (see
+        # TEST_DICTIONARIES in conftest.py), forcing the insert_one branch.
+        entries = [{"word": "new", "definition": "not old", "part_of_speech": "adjective"}]
+        await upsert_dictionary_entries(mock_mcp_db, "english", entries)
+
+        coll = mock_mcp_db.get_collection("dictionaries")
+        inserted_doc = coll.insert_one.call_args.args[0]
+        assert inserted_doc["entries"][0]["human_verified"] is True
+
+    @pytest.mark.asyncio
+    async def test_upsert_sets_human_verified_on_pushed_entry(self, mock_mcp_db):
+        """Regression: a new word pushed into an existing dictionary doc ($push path)
+        comes out human_verified=True."""
+        from mcp_server.tools.dictionary import upsert_dictionary_entries
+
+        entries = [{"word": "newword", "definition": "brand new", "part_of_speech": "noun"}]
+        await upsert_dictionary_entries(mock_mcp_db, "heb", entries)
+
+        coll = mock_mcp_db.get_collection("dictionaries")
+        pushed_entry = coll.update_one.call_args.args[1]["$push"]["entries"]
+        assert pushed_entry["human_verified"] is True
+
+    @pytest.mark.asyncio
+    async def test_upsert_flips_human_verified_on_existing_unverified_entry(self, mock_mcp_db):
+        """Direct regression test for the reported bug: an AI-suggested correction to
+        an entry that's currently human_verified=False (see 'אלהים' in
+        TEST_DICTIONARIES, conftest.py) must come out verified once a human approves
+        the tool call that saves it, matching routes/dictionary.py's REST behavior."""
+        from mcp_server.tools.dictionary import upsert_dictionary_entries
+
+        entries = [{"word": "אלהים", "definition": "corrected: God, gods (plural form)",
+                     "part_of_speech": "noun"}]
+        result = await upsert_dictionary_entries(mock_mcp_db, "heb", entries)
+        assert result["updated"] == 1
+
+        coll = mock_mcp_db.get_collection("dictionaries")
+        set_payload = coll.update_one.call_args.args[1]["$set"]
+        # Don't hardcode the fixture's entry index — assert on whichever key was set.
+        merged_entry = next(iter(set_payload.values()))
+        assert merged_entry["human_verified"] is True
+        assert merged_entry["definition"] == "corrected: God, gods (plural form)"
+
+    @pytest.mark.asyncio
+    async def test_upsert_rejects_client_supplied_human_verified(self, mock_mcp_db):
+        """Contract lock: human_verified is never client-settable, only server-forced.
+        CreateEntryRequest has extra='forbid' and no human_verified field, so an entry
+        payload trying to set it (e.g. a misbehaving LLM claiming its own entry is
+        verified) is rejected outright rather than silently accepted or overridden."""
+        from mcp_server.tools.dictionary import upsert_dictionary_entries
+
+        entries = [{"word": "test", "definition": "def", "human_verified": True}]
+        result = await upsert_dictionary_entries(mock_mcp_db, "heb", entries)
+
+        assert "error" in result
+        assert result["error"]["code"] == "validation_error"
+
+    @pytest.mark.asyncio
+    async def test_upsert_duplicate_word_in_batch_does_not_crash(self, mock_mcp_db):
+        """Regression: a batch that repeats the same new word twice used to raise
+        IndexError. The second occurrence took the update ($set) branch against an
+        index that only exists after the first occurrence's $push executes, but the
+        code indexed into the pre-loop entries snapshot, which doesn't have it yet.
+        The second occurrence should win and merge cleanly, not crash."""
+        from mcp_server.tools.dictionary import upsert_dictionary_entries
+
+        entries = [
+            {"word": "dup_test", "definition": "first def", "part_of_speech": "noun"},
+            {"word": "dup_test", "definition": "corrected def", "part_of_speech": "noun"},
+        ]
+        result = await upsert_dictionary_entries(mock_mcp_db, "heb", entries)
+
+        assert "error" not in result
+        assert result["created"] == 1
+        assert result["updated"] == 1
+
+        coll = mock_mcp_db.get_collection("dictionaries")
+        last_set = coll.update_one.call_args_list[-1].args[1]["$set"]
+        merged_entry = next(iter(last_set.values()))
+        assert merged_entry["definition"] == "corrected def"
+        assert merged_entry["human_verified"] is True

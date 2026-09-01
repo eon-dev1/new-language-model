@@ -36,15 +36,13 @@ vi.mock('../../src/renderer/api', () => ({
   fetchConversation: vi.fn(),
   deleteConversation: vi.fn(),
   fetchChatConfig: vi.fn().mockResolvedValue({
-    llm_provider: 'anthropic',
-    anthropic_model: 'claude-sonnet-4-6',
-    has_api_key: true,
-    api_key_preview: '...test',
+    llm_provider: 'openrouter',
     local_base_url: '',
     local_model: '',
-    has_openrouter_key: false,
-    openrouter_key_preview: '',
-    openrouter_model: '',
+    has_openrouter_key: true,
+    openrouter_key_preview: '...test',
+    openrouter_model: 'anthropic/claude-sonnet-4.6',
+    thinking_enabled: true,
   }),
   fetchChatSkills: vi.fn().mockResolvedValue([]),
 }));
@@ -52,13 +50,18 @@ vi.mock('../../src/renderer/api', () => ({
 // Mock import.meta.env for api.ts module initialization
 vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8221');
 
-// Helper: render useChat hook inside ChatProvider
-const renderChatHook = () => {
-  return renderHook(() => useChat(), {
+// Helper: render useChat hook inside ChatProvider.
+// Awaits a flush of ChatProvider's mount-time effects (refreshCurrentModel,
+// fetchChatSkills) so their state updates land inside act() instead of
+// leaking past the test body.
+const renderChatHook = async () => {
+  const result = renderHook(() => useChat(), {
     wrapper: ({ children }: { children: React.ReactNode }) => (
       <ChatProvider>{children}</ChatProvider>
     ),
   });
+  await act(async () => {});
+  return result;
 };
 
 // ---------------------------------------------------------------------------
@@ -174,34 +177,34 @@ describe('ChatContext chatMode state', () => {
     localStorage.clear();
   });
 
-  it('defaults to null when localStorage is empty', () => {
-    const { result } = renderChatHook();
+  it('defaults to null when localStorage is empty', async () => {
+    const { result } = await renderChatHook();
     expect(result.current.chatMode).toBeNull();
   });
 
-  it('restores think mode from localStorage on init', () => {
+  it('restores think mode from localStorage on init', async () => {
     localStorage.setItem('chat_mode', 'think');
-    const { result } = renderChatHook();
+    const { result } = await renderChatHook();
     expect(result.current.chatMode).toBe('think');
   });
 
-  it('restores think_harder mode from localStorage on init', () => {
+  it('restores think_harder mode from localStorage on init', async () => {
     localStorage.setItem('chat_mode', 'think_harder');
-    const { result } = renderChatHook();
+    const { result } = await renderChatHook();
     expect(result.current.chatMode).toBe('think_harder');
   });
 
-  it('falls back to null for unknown/invalid stored value', () => {
+  it('falls back to null for unknown/invalid stored value', async () => {
     // e.g. stale value from old codebase, or corrupted storage
     localStorage.setItem('chat_mode', 'invalid_mode_xyz');
-    const { result } = renderChatHook();
+    const { result } = await renderChatHook();
     expect(result.current.chatMode).toBeNull();
   });
 
-  it('falls back to null if old chat_thinking_enabled key is present (no migration)', () => {
+  it('falls back to null if old chat_thinking_enabled key is present (no migration)', async () => {
     // Old key from previous implementation — should be ignored, not migrated
     localStorage.setItem('chat_thinking_enabled', 'true');
-    const { result } = renderChatHook();
+    const { result } = await renderChatHook();
     expect(result.current.chatMode).toBeNull();
   });
 });
@@ -211,8 +214,8 @@ describe('ChatContext setChatMode', () => {
     localStorage.clear();
   });
 
-  it('sets mode to think and persists to localStorage', () => {
-    const { result } = renderChatHook();
+  it('sets mode to think and persists to localStorage', async () => {
+    const { result } = await renderChatHook();
 
     act(() => {
       result.current.setChatMode('think');
@@ -222,8 +225,8 @@ describe('ChatContext setChatMode', () => {
     expect(localStorage.getItem('chat_mode')).toBe('think');
   });
 
-  it('sets mode to think_harder and persists to localStorage', () => {
-    const { result } = renderChatHook();
+  it('sets mode to think_harder and persists to localStorage', async () => {
+    const { result } = await renderChatHook();
 
     act(() => {
       result.current.setChatMode('think_harder');
@@ -233,9 +236,9 @@ describe('ChatContext setChatMode', () => {
     expect(localStorage.getItem('chat_mode')).toBe('think_harder');
   });
 
-  it('setChatMode(null) clears the localStorage key (not writes "null")', () => {
+  it('setChatMode(null) clears the localStorage key (not writes "null")', async () => {
     localStorage.setItem('chat_mode', 'think');
-    const { result } = renderChatHook();
+    const { result } = await renderChatHook();
 
     act(() => {
       result.current.setChatMode(null);
@@ -246,8 +249,8 @@ describe('ChatContext setChatMode', () => {
     expect(localStorage.getItem('chat_mode')).toBeNull();
   });
 
-  it('uses the key chat_mode, not the old chat_thinking_enabled key', () => {
-    const { result } = renderChatHook();
+  it('uses the key chat_mode, not the old chat_thinking_enabled key', async () => {
+    const { result } = await renderChatHook();
 
     act(() => {
       result.current.setChatMode('think');
@@ -258,9 +261,9 @@ describe('ChatContext setChatMode', () => {
     expect(localStorage.getItem('chat_thinking_enabled')).toBeNull();
   });
 
-  it('toggling same mode twice returns to null', () => {
+  it('toggling same mode twice returns to null', async () => {
     // UI behavior: click active mode button → deselect (returns to default)
-    const { result } = renderChatHook();
+    const { result } = await renderChatHook();
 
     act(() => { result.current.setChatMode('think'); });
     expect(result.current.chatMode).toBe('think');
@@ -324,17 +327,14 @@ describe('refreshCurrentModel — provider branching', () => {
   it('sets currentModel from openrouter_model when provider is openrouter', async () => {
     vi.mocked(fetchChatConfig).mockResolvedValueOnce({
       llm_provider: 'openrouter',
-      anthropic_model: 'claude-sonnet-4-6',
       openrouter_model: 'qwen/qwen3.5-397b-a17b',
       local_model: '',
-      has_api_key: true,
-      api_key_preview: '...test',
       local_base_url: '',
       has_openrouter_key: true,
       openrouter_key_preview: '...abcd',
+      thinking_enabled: true,
     });
-    const { result } = renderChatHook();
-    await act(async () => {});
+    const { result } = await renderChatHook();
 
     expect(result.current.currentModel).toBe('qwen/qwen3.5-397b-a17b');
     expect(result.current.currentProvider).toBe('openrouter');
@@ -343,17 +343,14 @@ describe('refreshCurrentModel — provider branching', () => {
   it('sets currentModel from local_model when provider is local', async () => {
     vi.mocked(fetchChatConfig).mockResolvedValueOnce({
       llm_provider: 'local',
-      anthropic_model: 'claude-sonnet-4-6',
       openrouter_model: '',
       local_model: 'llama-3.3-70b',
-      has_api_key: false,
-      api_key_preview: '',
       local_base_url: 'http://127.0.0.1:8080',
       has_openrouter_key: false,
       openrouter_key_preview: '',
+      thinking_enabled: true,
     });
-    const { result } = renderChatHook();
-    await act(async () => {});
+    const { result } = await renderChatHook();
 
     expect(result.current.currentModel).toBe('llama-3.3-70b');
     expect(result.current.currentProvider).toBe('local');

@@ -1,100 +1,11 @@
 """
-Test suite for db_connector module structure and imports.
-Tests all imports, module structure, and basic functionality.
-
-Migrated from db_connector/__tests_db_connector__/
+Test suite for db_connector module structure.
+Asserts the public contract (method names, property type) of MongoDBSettings
+and MongoDBConnector. Pure tautological imports/file-existence checks were
+removed — failed imports fire ImportError before any assertion would run.
 """
 
-import importlib
-from pathlib import Path
-
 import pytest
-
-
-# Path to db_connector module (relative to back_end/)
-DB_CONNECTOR_PATH = Path(__file__).parent.parent.parent.parent / "db_connector"
-
-
-class TestDbConnectorStructure:
-    """Test db_connector module structure and file organization."""
-
-    def test_db_connector_directory_exists(self):
-        """Test that db_connector directory exists."""
-        assert DB_CONNECTOR_PATH.exists()
-        assert DB_CONNECTOR_PATH.is_dir()
-
-    @pytest.mark.parametrize("file_name", [
-        "__init__.py",
-        "settings.py",
-        "connection.py",
-    ])
-    def test_required_files_exist(self, file_name):
-        """Test that all required files exist."""
-        file_path = DB_CONNECTOR_PATH / file_name
-        assert file_path.exists(), f"Required file {file_name} does not exist at {file_path}"
-
-
-class TestDbConnectorImports:
-    """Test all imports in db_connector module work correctly."""
-
-    def test_can_import_db_connector_package(self):
-        """Test that db_connector can be imported as a package."""
-        import db_connector
-        assert db_connector is not None
-
-    def test_can_import_settings_module(self):
-        """Test that settings module can be imported."""
-        from db_connector import settings
-        assert settings is not None
-
-    def test_can_import_connection_module(self):
-        """Test that connection module can be imported."""
-        from db_connector import connection
-        assert connection is not None
-
-    def test_can_import_mongodb_settings_class(self):
-        """Test that MongoDBSettings class can be imported."""
-        from db_connector.settings import MongoDBSettings
-        assert callable(MongoDBSettings)
-
-    def test_can_import_mongodb_connector_class(self):
-        """Test that MongoDBConnector class can be imported."""
-        from db_connector.connection import MongoDBConnector
-        assert callable(MongoDBConnector)
-
-
-class TestRequiredDependencies:
-    """Test that all required dependencies are available."""
-
-    def test_motor_available(self):
-        """Test that Motor (MongoDB async driver) is available."""
-        import motor
-        import motor.motor_asyncio
-        assert motor is not None
-        assert motor.motor_asyncio is not None
-
-    def test_pymongo_available(self):
-        """Test that PyMongo is available."""
-        import pymongo
-        assert pymongo is not None
-
-    def test_pydantic_available(self):
-        """Test that Pydantic is available."""
-        import pydantic
-        assert pydantic is not None
-
-    def test_pydantic_settings_available(self):
-        """Test that pydantic-settings is available."""
-        import pydantic_settings
-        from pydantic_settings import BaseSettings
-        assert pydantic_settings is not None
-        assert BaseSettings is not None
-
-    def test_dnspython_available(self):
-        """Test that dnspython (required for MongoDB SRV records) is available."""
-        import dns
-        import dns.resolver
-        assert dns is not None
 
 
 class TestClassStructure:
@@ -128,15 +39,3 @@ class TestClassStructure:
         attr = getattr(MongoDBConnector, property_name)
         assert isinstance(attr, property), \
             f"MongoDBConnector.{property_name} should be a property"
-
-
-class TestModuleInitialization:
-    """Test that modules can be initialized without errors."""
-
-    def test_settings_module_loads_without_error(self):
-        """Test that settings module can be loaded without import errors."""
-        importlib.reload(importlib.import_module('db_connector.settings'))
-
-    def test_connection_module_loads_without_error(self):
-        """Test that connection module can be loaded without import errors."""
-        importlib.reload(importlib.import_module('db_connector.connection'))

@@ -197,7 +197,7 @@ export function BibleReader({ languageCode, languageName, onBack }: BibleReaderP
 
     setSavingVerse(true);
     try {
-      await updateVerseText(
+      const result = await updateVerseText(
         languageCode,
         selectedBook.book_code,
         selectedChapter,
@@ -205,11 +205,11 @@ export function BibleReader({ languageCode, languageName, onBack }: BibleReaderP
         textToSave
       );
 
-      // Update local state
+      // Update local state from server response (human_verified depends on whether text is empty)
       setVerses(prev =>
         prev.map(v =>
           v.verse === verseNum
-            ? { ...v, translated_text: textToSave, human_verified: true }
+            ? { ...v, translated_text: result.translated_text, human_verified: result.human_verified }
             : v
         )
       );

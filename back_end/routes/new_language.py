@@ -14,10 +14,10 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from db_connector.connection import MongoDBConnector
 from constants import Collection
-from utils.bible_generator.chapter_verse_numbers import BIBLE_CHAPTER_VERSES, get_all_books
+from utils.bible_generator.chapter_verse_numbers import BIBLE_CHAPTER_VERSES, get_all_books, get_chapters_for_book
 from .dependencies import get_db, api_error
 
 router = APIRouter()
@@ -77,7 +77,7 @@ async def create_new_language_mongodb(
                 "language_name": language,
                 "language_code": language_code,
                 "is_base_language": is_english,
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
                 "status": "active",
                 "bible_books_count": len(books),
                 "translation_stats": {
@@ -101,7 +101,7 @@ async def create_new_language_mongodb(
             logger.info(f"Language {language} already exists, updating metadata")
             await languages_collection.update_one(
                 {"language_code": language_code},
-                {"$set": {"updated_at": datetime.utcnow(), "status": "active"}}
+                {"$set": {"updated_at": datetime.now(timezone.utc), "status": "active"}}
             )
 
         # 2. Create Bible Books Structure (one per book)
@@ -122,14 +122,10 @@ async def create_new_language_mongodb(
             })
 
             if not existing_book:
-                chapters_data = []
-                for chapter_num, verse_count in BIBLE_CHAPTER_VERSES[book_name]:
-                    chapters_data.append({
-                        "chapter_number": chapter_num,
-                        "verse_count": verse_count,
-                        "verses": [{"verse_number": v, "english_text": "", "translated_text": "", "comments": ""}
-                                 for v in range(1, verse_count + 1)]
-                    })
+                chapters_data = [
+                    {"chapter": chapter_num, "verse_count": verse_count}
+                    for chapter_num, verse_count in get_chapters_for_book(book_name)
+                ]
 
                 book_doc = {
                     "language_code": language_code,
@@ -139,7 +135,7 @@ async def create_new_language_mongodb(
                     "total_chapters": len(BIBLE_CHAPTER_VERSES[book_name]),
                     "total_verses": sum(verses for _, verses in BIBLE_CHAPTER_VERSES[book_name]),
                     "chapters": chapters_data,
-                    "created_at": datetime.utcnow(),
+                    "created_at": datetime.now(timezone.utc),
                     "translation_status": "not_started",
                     "metadata": {
                         "testament": "old" if books.index(book_name) < 39 else "new",
@@ -167,7 +163,7 @@ async def create_new_language_mongodb(
                 "dictionary_name": f"{language} Dictionary",
                 "entries": [],
                 "entry_count": 0,
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
                 "categories": [
                     "noun", "verb", "adjective", "adverb", "preposition",
                     "conjunction", "interjection", "pronoun", "article", "other"
@@ -195,7 +191,7 @@ async def create_new_language_mongodb(
                 "language_code": language_code,
                 "language_name": language,
                 "grammar_system_name": f"{language} Grammar System",
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
                 "categories": {
                     "phonology": {
                         "description": "Sound system and pronunciation rules",

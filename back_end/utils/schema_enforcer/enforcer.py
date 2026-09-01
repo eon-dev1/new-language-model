@@ -5,6 +5,7 @@ Compares actual database state against EXPECTED_COLLECTIONS schema,
 creates missing indexes/collections (in enforce mode), and reports drift.
 """
 
+import logging
 from datetime import datetime, timezone
 
 from utils.schema_enforcer.schema_definition import (
@@ -14,6 +15,8 @@ from utils.schema_enforcer.schema_definition import (
 )
 from utils.schema_enforcer.report import EnforcementReport
 from utils.schema_enforcer.validators import validate_document
+
+logger = logging.getLogger(__name__)
 
 
 class SchemaEnforcer:
@@ -166,9 +169,11 @@ class SchemaEnforcer:
                     issues = validate_document(doc, schema, coll_name)
                     for issue in issues:
                         self.report.add_warning(f"{coll_name}: {issue}")
-            except Exception:
-                # Collection might not exist or be empty
-                pass
+            except Exception as e:
+                # Collection might not exist or be empty, or the sample cursor
+                # hiccuped mid-scan (e.g. mongod restart) — log it rather than
+                # silently skipping the rest of this collection's validation.
+                logger.warning(f"sample validation skipped for {coll_name}: {e}")
 
     async def _seed_required_data(self) -> None:
         """

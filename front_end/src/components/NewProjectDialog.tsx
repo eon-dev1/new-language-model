@@ -10,15 +10,11 @@ import {
   Typography,
   LinearProgress,
   Alert,
-  FormControl,
-  FormLabel,
-  RadioGroup,
   FormControlLabel,
-  Radio,
   Checkbox
 } from '@mui/material';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
-import { selectFolder, importBible, importHtmlBible } from '../renderer/api';
+import { selectFolder, importBible } from '../renderer/api';
 
 interface NewProjectDialogProps {
   open: boolean;
@@ -39,7 +35,6 @@ export const NewProjectDialog: React.FC<NewProjectDialogProps> = ({
   console.log('[NewProjectDialog] Rendering, open =', open);
   const [languageName, setLanguageName] = useState('');
   const [folderPath, setFolderPath] = useState('');
-  const [format, setFormat] = useState<'usfm' | 'html'>('usfm');
   const [humanVerified, setHumanVerified] = useState(false);
   const [importState, setImportState] = useState<ImportState>({
     status: 'idle',
@@ -62,24 +57,17 @@ export const NewProjectDialog: React.FC<NewProjectDialogProps> = ({
       return;
     }
 
-    setImportState({ status: 'importing', message: `Importing ${format.toUpperCase()} Bible data...` });
+    setImportState({ status: 'importing', message: 'Importing USFM Bible data...' });
 
     try {
       const languageCode = languageName.toLowerCase().replace(/\s+/g, '_');
 
-      const result = format === 'usfm'
-        ? await importBible({
-            language_code: languageCode,
-            language_name: languageName,
-            usfm_directory: folderPath,
-            human_verified: humanVerified,
-          })
-        : await importHtmlBible({
-            language_code: languageCode,
-            language_name: languageName,
-            html_directory: folderPath,
-            human_verified: humanVerified,
-          });
+      const result = await importBible({
+          language_code: languageCode,
+          language_name: languageName,
+          usfm_directory: folderPath,
+          human_verified: humanVerified,
+        });
 
       setImportState({
         status: 'success',
@@ -102,7 +90,6 @@ export const NewProjectDialog: React.FC<NewProjectDialogProps> = ({
   const handleClose = () => {
     setLanguageName('');
     setFolderPath('');
-    setFormat('usfm');
     setHumanVerified(false);
     setImportState({ status: 'idle', message: '' });
     onClose();
@@ -125,23 +112,11 @@ export const NewProjectDialog: React.FC<NewProjectDialogProps> = ({
             disabled={importState.status === 'importing'}
           />
 
-          <FormControl disabled={importState.status === 'importing'}>
-            <FormLabel>Bible Format</FormLabel>
-            <RadioGroup
-              row
-              value={format}
-              onChange={(e) => setFormat(e.target.value as 'usfm' | 'html')}
-            >
-              <FormControlLabel value="usfm" control={<Radio />} label="USFM files (.usfm, .SFM)" />
-              <FormControlLabel value="html" control={<Radio />} label="HTML files (.htm)" />
-            </RadioGroup>
-          </FormControl>
-
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
             <TextField
-              label="Directory"
+              label="USFM Directory"
               value={folderPath}
-              placeholder={format === 'usfm' ? 'Select folder containing USFM files...' : 'Select folder containing HTML files...'}
+              placeholder="Select folder containing USFM files..."
               fullWidth
               required
               disabled

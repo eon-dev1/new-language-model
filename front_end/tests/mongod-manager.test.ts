@@ -265,7 +265,34 @@ describe('Mongod Manager', () => {
     expect(proc.kill).not.toHaveBeenCalled();
   });
 
-  // 8. Concurrency guard: two simultaneous calls → one spawn, both get true
+  // 8. stopMongod: sends SIGTERM on darwin (same as linux — not taskkill)
+  it('sends SIGTERM on darwin; does not call taskkill', async () => {
+    let call = 0;
+    mockNet.createConnection.mockImplementation(() => {
+      const s = makeSocket();
+      call++;
+      if (call === 1) process.nextTick(() => s.emit('error', new Error('ECONNREFUSED')));
+      else            process.nextTick(() => s.emit('connect'));
+      return s;
+    });
+
+    const proc = makeProc();
+    mockSpawn.mockReturnValue(proc);
+    await ensureMongodRunning();
+
+    const orig = process.platform;
+    try {
+      Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+      stopMongod();
+      expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+      const taskkillCalls = mockSpawn.mock.calls.filter(c => c[0] === 'taskkill');
+      expect(taskkillCalls).toHaveLength(0);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: orig, configurable: true });
+    }
+  });
+
+  // 9. Concurrency guard: two simultaneous calls → one spawn, both get true
   it('two concurrent ensureMongodRunning() calls share the same Promise (one spawn)', async () => {
     let call = 0;
     mockNet.createConnection.mockImplementation(() => {

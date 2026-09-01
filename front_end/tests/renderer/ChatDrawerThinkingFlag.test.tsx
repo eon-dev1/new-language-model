@@ -44,15 +44,12 @@ vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8221');
 // ---------------------------------------------------------------------------
 
 const baseConfig = {
-  llm_provider: 'anthropic',
-  anthropic_model: 'claude-sonnet-4-6',
-  has_api_key: true,
-  api_key_preview: '...test',
+  llm_provider: 'openrouter',
   local_base_url: '',
   local_model: '',
-  has_openrouter_key: false,
-  openrouter_key_preview: '',
-  openrouter_model: '',
+  has_openrouter_key: true,
+  openrouter_key_preview: '...test',
+  openrouter_model: 'anthropic/claude-sonnet-4.6',
 };
 
 /** Wraps ChatDrawer in the required provider stack. */

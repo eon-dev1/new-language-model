@@ -20,13 +20,12 @@ The NLM Backend follows a layered architecture designed for async operations, se
 |  +------------------------------------------------------------+  |
 |  |  Request ID Middleware (request_id_middleware)              |  |
 |  +------------------------------------------------------------+  |
-|  |  Routes (20 total, including):                              |  |
+|  |  Routes (see routes/ for the full list), including:         |  |
 |  |  - /api/new-language        (POST)                          |  |
 |  |  - /api/languages           (GET)                           |  |
 |  |  - /api/bible-books         (GET)                           |  |
 |  |  - /api/check-connection    (GET)                           |  |
 |  |  - /api/import-bible        (POST)                          |  |
-|  |  - /api/import-html-bible   (POST)                          |  |
 |  |  - /api/bible-reader        (GET)                           |  |
 |  |  - /api/dictionary          (GET/POST/PATCH)                |  |
 |  |  - /api/grammar             (GET/PATCH)                     |  |
@@ -66,6 +65,7 @@ The NLM Backend follows a layered architecture designed for async operations, se
 |  |  - dictionaries       - grammar_systems                     |  |
 |  |  - word_index         - correction_log                      |  |
 |  |  - language_notes     - chat_conversations                  |  |
+|  |  - phrase_index                                             |  |
 |  +------------------------------------------------------------+  |
 +------------------------------------------------------------------+
 ```
@@ -76,11 +76,11 @@ The NLM Backend follows a layered architecture designed for async operations, se
 
 **Responsibilities**:
 - Initialize FastAPI application with metadata
-- Register 20 route handlers with `/api` prefix
+- Register route handlers (see `routes/`) with `/api` prefix
 - Attach two middleware layers for security and log tracing
 - Start Uvicorn server on localhost:8221
 
-**Note**: API authentication has been disabled. No `verify_api_key` or Bearer token is required. MongoDB provides its own authentication layer.
+**Note**: API authentication is disabled — see [api.md](./api.md#authentication).
 
 **Key Components**:
 ```python
@@ -108,21 +108,7 @@ FAST_API_PORT = int(os.getenv('FAST_API_PORT', 8221))
 - Configure connection pool settings
 - Provide connection options for Motor client
 
-**Credential Loading Flow**:
-```
-+---------------------------------------+
-| ~/.nlm/mongodb_credentials.env        |
-| (external — never in repository)      |
-| - MONGODB_CONNECTION_STRING (required)|
-| - DATABASE_NAME (optional)            |
-+---------------------------------------+
-            |
-            v
-+---------------------------------------+
-| MongoDBSettings Instance               |
-| database_name default: "nlm_translator"|
-+---------------------------------------+
-```
+**Credential Loading Flow**: reads `~/.nlm/mongodb_credentials.env` (external, never in repo — `MONGODB_CONNECTION_STRING` required, `DATABASE_NAME` optional) and builds a `MongoDBSettings` instance (`database_name` defaults to `"nlm_translator"`).
 
 #### connection.py - MongoDB Connector
 
@@ -131,31 +117,6 @@ FAST_API_PORT = int(os.getenv('FAST_API_PORT', 8221))
 - Provide database and collection access
 - Implement health check functionality
 - Support async context manager pattern
-
-**Connection State Machine**:
-```
-    +-------------+
-    | INITIALIZED |
-    +-------------+
-          |
-          | connect()
-          v
-    +-------------+
-    | CONNECTING  |
-    +-------------+
-          |
-          | ping successful
-          v
-    +-------------+
-    | CONNECTED   |<----+
-    +-------------+     |
-          |             |
-          | disconnect()|  reconnect via
-          v             |  ensure_connected()
-    +--------------+    |
-    | DISCONNECTED |----+
-    +--------------+
-```
 
 ### routes/ - API Endpoint Handlers
 
@@ -168,56 +129,20 @@ FAST_API_PORT = int(os.getenv('FAST_API_PORT', 8221))
 - Initialize dictionary and grammar frameworks (one each)
 - Create database indexes
 
-**Data Flow for New Language Creation**:
-```
-Input: language="Kope"
-          |
-          v
-    +------------------+
-    | Validate Input   |
-    | (alphanumeric)   |
-    +------------------+
-          |
-          | language_code = "kope"
-          v
-    +------------------+
-    | Create Language  |
-    | Metadata         |
-    +------------------+
-          |
-          v
-    +------------------+
-    | Create 66 Books  |
-    | (one per book)   |
-    +------------------+
-          |
-          v
-    +------------------+
-    | Create Dictionary|
-    | Framework (x1)   |
-    +------------------+
-          |
-          v
-    +------------------+
-    | Create Grammar   |
-    | System (x1)      |
-    +------------------+
-          |
-          v
-    +------------------+
-    | Create Indexes   |
-    | on bible_texts   |
-    +------------------+
-          |
-          v
-Output: Success response with counts
-```
+**Data Flow for New Language Creation** (e.g. `language="Kope"`):
+1. Validate input (alphanumeric) → normalize to `language_code = "kope"`
+2. Create language metadata document
+3. Create 66 Bible book documents (one per book)
+4. Create dictionary framework (x1)
+5. Create grammar system (x1)
+6. Create indexes on `bible_texts`
+7. Return success response with counts
 
 ### utils/ - Utility Modules
 
 #### bible_generator/chapter_verse_numbers.py
 
-**Purpose**: Provides static data for all 66 Bible books with accurate chapter and verse counts based on ESV (English Standard Version).
+**Purpose**: Provides static data for all 66 Bible books with accurate chapter and verse counts based on ESV (English Standard Version). See [database.md](./database.md#data-statistics) for the full book/chapter/verse breakdown.
 
 **Data Structure**:
 ```python
@@ -227,12 +152,6 @@ BIBLE_CHAPTER_VERSES = {
     # ... all 66 books
 }
 ```
-
-**Statistics**:
-- 39 Old Testament books
-- 27 New Testament books
-- 1,189 total chapters
-- 31,102 total verses
 
 #### bible_generator/bible_collection_manager.py
 
@@ -246,38 +165,6 @@ BIBLE_CHAPTER_VERSES = {
 - `create_bible_document()` - Create standardized document structure
 - `create_bible_indexes()` - Set up efficient query indexes
 - `get_collection_stats()` - Retrieve collection statistics
-
-## Async Patterns
-
-### Motor Async Driver Usage
-
-All database operations use Python's async/await pattern with the Motor driver:
-
-```python
-# Connection
-async def connect(self) -> None:
-    self._client = AsyncIOMotorClient(connection_string, **options)
-    await self._client.admin.command('ping')
-
-# Database operations
-async def create_document(self, collection_name: str, document: dict):
-    collection = self._database[collection_name]
-    result = await collection.insert_one(document)
-    return result.inserted_id
-```
-
-### FastAPI Async Endpoints
-
-All route handlers are async to maximize concurrency:
-
-```python
-@router.post("/new-language", response_model=Dict[str, str])
-async def create_new_language_mongodb(language: str):
-    connector = MongoDBConnector()
-    await connector.connect()
-    # ... async operations
-    await connector.disconnect()
-```
 
 ## Singleton MongoDB Connector
 
@@ -295,32 +182,13 @@ async def get_mongodb_connector() -> MongoDBConnector:
     return _global_connector
 ```
 
-**Note**: REST routes use `Depends(get_db)` from `routes/dependencies.py`, which creates and tears down a connector per request. The global `get_mongodb_connector()` singleton is used by the MCP server for long-lived AI sessions, not by REST routes.
+**Note**: this singleton isn't the only connection pattern in use — see [chat-system.md](./chat-system.md#connection-models) for which pattern applies to which endpoint type.
 
 ## Security Architecture
 
 ### Authentication Status
 
-**API authentication has been disabled for local development.** The server relies on:
-- MongoDB's own authentication layer for database access
-- Localhost-only binding (127.0.0.1) preventing external access
-
-```
-Client Request
-      |
-      | No authentication required
-      v
-+------------------+
-| Route Handler    |
-+------------------+
-      |
-      v
-+------------------+
-| MongoDBConnector |
-| (uses MongoDB    |
-|  credentials)    |
-+------------------+
-```
+API authentication is disabled — see [api.md](./api.md#authentication) for the full rationale.
 
 ### Security Measures
 
@@ -328,27 +196,6 @@ Client Request
 2. **MongoDB Authentication**: Database operations use MongoDB's auth layer
 3. **Credential Isolation**: Credentials stored in `~/.nlm/` outside the repository
 4. **Input Validation**: Language names validated against regex pattern
-
-## Configuration Flow
-
-```
-+-------------------------------------------+
-| OS Environment                            |
-| FAST_API_PORT (read directly by main.py)  |
-+-------------------------------------------+
-
-+-------------------------------------------+     +----------------------+
-| ~/.nlm/mongodb_credentials.env            | --> | MongoDBSettings      |
-| (external — never in repository)          |     | - Connection String  |
-| - MONGODB_CONNECTION_STRING (required)    |     | - Database Name      |
-| - DATABASE_NAME (optional)                |     +----------------------+
-+-------------------------------------------+              |
-                                                            v
-                                                 +----------------------+
-                                                 | MongoDBConnector     |
-                                                 | Initialized          |
-                                                 +----------------------+
-```
 
 ## Error Handling Strategy
 
@@ -359,27 +206,4 @@ Client Request
 | 400 | Invalid input (e.g., bad language name) |
 | 500 | Internal server error (database failures, etc.) |
 
-### Exception Handling Pattern
-
-```python
-try:
-    connector = MongoDBConnector()
-    await connector.connect()
-    # ... operations
-except HTTPException:
-    raise  # Re-raise HTTP exceptions
-except Exception as e:
-    logger.error(f"Error: {e}")
-    raise HTTPException(status_code=500, detail=str(e))
-finally:
-    if connector:
-        await connector.disconnect()
-```
-
-## Future Architecture Considerations
-
-1. **Connection Pooling Optimization**: Tune pool sizes based on load patterns
-2. **Caching Layer**: Add Redis for frequently accessed data
-3. **Background Tasks**: Use FastAPI BackgroundTasks for async processing
-4. **Rate Limiting**: Implement request throttling
-5. **Metrics Collection**: Add Prometheus/OpenTelemetry integration
+See [development.md](./development.md#error-handling-pattern) for the exception-handling code convention.

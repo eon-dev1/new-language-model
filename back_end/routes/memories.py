@@ -10,9 +10,9 @@ Provides endpoints to:
 """
 
 from fastapi import APIRouter, HTTPException, Path, Body, Depends
-from pydantic import BaseModel, Field
-from typing import List, Optional
-from datetime import datetime
+from pydantic import BaseModel, Field, field_validator
+from typing import List
+from datetime import datetime, timezone
 import logging
 import uuid
 
@@ -23,12 +23,15 @@ from .dependencies import get_db, api_error
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+TITLE_MAX = 200
+
 
 # --- Pydantic Models ---
 
 class NoteItem(BaseModel):
     """A single language note."""
     id: str
+    title: str = Field(..., min_length=1, max_length=TITLE_MAX)
     text: str
     created_at: datetime
     updated_at: datetime
@@ -42,7 +45,19 @@ class NotesResponse(BaseModel):
 
 
 class CreateNoteRequest(BaseModel):
-    text: str = Field(..., min_length=1)
+    title: str = Field(..., max_length=TITLE_MAX)
+    text: str
+
+    @field_validator("title", "text")
+    @classmethod
+    def _strip_and_require(cls, v: str) -> str:
+        # Strip first, then enforce non-empty. Field(min_length=1) alone would
+        # accept "   " and let the route store an effectively empty value that
+        # would then fail the next GET via NoteItem(min_length=1).
+        v = v.strip()
+        if not v:
+            raise ValueError("must be non-empty after stripping whitespace")
+        return v
 
 
 class NoteActionResponse(BaseModel):
@@ -81,7 +96,8 @@ async def get_notes(
         notes = [
             NoteItem(
                 id=n["id"],
-                text=n["text"],
+                title=n.get("title", ""),
+                text=n.get("text", ""),
                 created_at=n["created_at"],
                 updated_at=n["updated_at"]
             )
@@ -115,10 +131,11 @@ async def create_note(
         database = db.get_database()
         collection = database[Collection.LANGUAGE_NOTES]
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         note_id = str(uuid.uuid4())
         new_note = {
             "id": note_id,
+            "title": request.title,
             "text": request.text,
             "created_at": now,
             "updated_at": now
@@ -165,12 +182,13 @@ async def update_note(
         database = db.get_database()
         collection = database[Collection.LANGUAGE_NOTES]
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         result = await collection.update_one(
             {"language_code": language_code, "notes.id": note_id},
             {
                 "$set": {
+                    "notes.$.title": request.title,
                     "notes.$.text": request.text,
                     "notes.$.updated_at": now,
                     "updated_at": now
@@ -211,7 +229,7 @@ async def delete_note(
         database = db.get_database()
         collection = database[Collection.LANGUAGE_NOTES]
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         result = await collection.update_one(
             {"language_code": language_code, "notes.id": note_id},

@@ -100,7 +100,6 @@ EXPECTED_COLLECTIONS: dict[str, dict[str, Any]] = {
         ],
         "required_fields": {
             "language_code": str,
-            "language_name": str,
             "book_name": str,
             "book_code": str,
             "total_chapters": int,
@@ -111,6 +110,7 @@ EXPECTED_COLLECTIONS: dict[str, dict[str, Any]] = {
             "metadata": dict,
         },
         "optional_fields": {
+            "language_name": str,
             "updated_at": "datetime",
         },
         "embedded_schema": {
@@ -122,6 +122,13 @@ EXPECTED_COLLECTIONS: dict[str, dict[str, Any]] = {
                 "optional_fields": {
                     "ai_model": str,
                 },
+            },
+            "chapters": {
+                "required_fields": {
+                    "chapter": int,
+                    "verse_count": int,
+                },
+                "optional_fields": {},
             },
         },
     },
@@ -263,6 +270,7 @@ EXPECTED_COLLECTIONS: dict[str, dict[str, Any]] = {
             "notes": {
                 "required_fields": {
                     "id": str,
+                    "title": str,
                     "text": str,
                     "created_at": "datetime",
                     "updated_at": "datetime",
@@ -328,6 +336,35 @@ EXPECTED_COLLECTIONS: dict[str, dict[str, Any]] = {
             "occurrences": list,
             "first_seen": dict,
             "in_dictionary": bool,
+            "last_rebuilt": "datetime",
+        },
+        "optional_fields": {},
+    },
+    "phrase_index": {
+        # Precomputed inverted index of recurring 4-grams -> verse locations.
+        # One document per (language_code, phrase). Built by
+        # utils/phrase_index/builder.py, queried by the get_phrase_context MCP tool.
+        # Canonical phrase form: " ".join(tokenize_verse(text)) — single space,
+        # no normalization beyond what the tokenizer produces. Builder and tool
+        # MUST agree on this form; a mismatch silently returns zero hits.
+        "required": False,  # Created on first build
+        "indexes": [
+            {
+                "keys": [
+                    ("language_code", 1),
+                    ("phrase", 1),
+                ],
+                "unique": True,
+                "name": "phrase_lookup",
+            },
+        ],
+        "required_fields": {
+            "language_code": str,
+            "phrase": str,
+            "n": int,
+            "df": int,
+            "min_word_df": int,
+            "locations": list,
             "last_rebuilt": "datetime",
         },
         "optional_fields": {},

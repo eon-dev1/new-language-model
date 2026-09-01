@@ -27,6 +27,7 @@ The NLM platform uses MongoDB as its primary database, storing Bible translation
 | `dictionaries` | Word entries with definitions | Active (empty) |
 | `grammar_systems` | Grammar rules organized by category | Active (empty) |
 | `word_index` | Word frequency and dictionary gap tracking | Active |
+| `phrase_index` | Recurring-phrase index for `get_phrase_context` | Active |
 | `correction_log` | Log of text corrections | Active |
 | `language_notes` | Notes attached to languages | Active |
 | `chat_conversations` | AI chat conversation history | Active |
@@ -44,8 +45,6 @@ The NLM platform uses MongoDB as its primary database, storing Bible translation
 ## Collection: languages
 
 Stores metadata for each language in the system, including translation progress tracking.
-
-> **See**: `utils/schema_enforcer/schema_definition.py` for authoritative field definitions
 
 ### Indexes
 
@@ -117,8 +116,6 @@ Stores metadata for each language in the system, including translation progress 
 Stores the canonical Bible structure with 31,102 verses. This is the reference structure
 for all languages - actual translations are stored in `bible_texts`.
 
-> **See**: `utils/schema_enforcer/schema_definition.py` for authoritative field definitions
-
 ### Schema
 
 ```javascript
@@ -158,8 +155,6 @@ for all languages - actual translations are stored in `bible_texts`.
 
 Stores language-specific book metadata with embedded chapter information. One document per
 (language, book) combination. This is the primary collection for book lists shown in the frontend.
-
-> **See**: `utils/schema_enforcer/schema_definition.py` for authoritative field definitions
 
 ### Indexes
 
@@ -230,8 +225,6 @@ Stores language-specific book metadata with embedded chapter information. One do
 Stores individual verses for efficient querying and search. This is the primary collection
 for verse content across all languages. One document per (language, book, chapter, verse).
 
-> **See**: `utils/schema_enforcer/schema_definition.py` for authoritative field definitions
-
 ### Schema
 
 ```javascript
@@ -301,8 +294,6 @@ db.bible_texts.countDocuments({
 ## Collection: dictionaries
 
 Stores dictionary entries for each language. One document per language with entries embedded.
-
-> **See**: `utils/schema_enforcer/schema_definition.py` for authoritative field definitions
 
 ### Indexes
 
@@ -390,8 +381,6 @@ Stores dictionary entries for each language. One document per language with entr
 Stores comprehensive grammar frameworks organized by linguistic categories.
 One document per language.
 
-> **See**: `utils/schema_enforcer/schema_definition.py` for authoritative field definitions
-
 ### Indexes
 
 ```javascript
@@ -473,73 +462,6 @@ One document per language.
 
 ---
 
-## Human Verification Fields
-
-The platform supports verification workflows for content. The `human_verified` field appears in multiple collections:
-
-### Verification by Collection
-
-| Collection | Field Location | Default | Notes |
-|------------|----------------|---------|-------|
-| `bible_texts` | Document root | `false` | Only for non-English verses |
-| `dictionaries` | `entries[].human_verified` | `false` | Per-entry verification |
-| `grammar_systems` | `categories.<name>.human_verified` | `false` | Per-category verification |
-
-### bible_texts Verification
-
-For non-English verses, `human_verified` indicates whether a human translator has reviewed and approved the verse:
-
-```javascript
-{
-  "language_code": "bughotu",
-  "book_code": "matthew",
-  "chapter": 1,
-  "verse": 1,
-  "translated_text": "...",
-  "human_verified": false  // Awaiting human review
-}
-```
-
-**Note**: English verses (the source text) do not have this field since they are the reference.
-
-### Dictionary Entry Verification
-
-Each dictionary entry can be individually verified:
-
-```javascript
-{
-  "entries": [
-    {
-      "word": "example",
-      "definition": "...",
-      "human_verified": true  // This entry has been verified
-    },
-    {
-      "word": "pending",
-      "definition": "...",
-      "human_verified": false  // This entry awaits verification
-    }
-  ]
-}
-```
-
-### Grammar Category Verification
-
-Grammar categories track verification at the category level:
-
-```javascript
-{
-  "categories": {
-    "phonology": {
-      "human_verified": true,   // Category reviewed by human
-      "updated_at": ISODate("...")
-    }
-  }
-}
-```
-
----
-
 ## Collection: word_index
 
 Tracks word frequency across all verses for a language, with dictionary gap detection. One document per (language, word) pair. Rebuilt asynchronously when verse text is edited.
@@ -572,6 +494,37 @@ Tracks word frequency across all verses for a language, with dictionary gap dete
   "occurrences": [                 // Sample occurrences (capped)
     { "book_code": String, "chapter": Number, "verse": Number }
   ]
+}
+```
+
+---
+
+## Collection: phrase_index
+
+Precomputed inverted index of recurring 4-grams to verse locations, for the `get_phrase_context` MCP tool. One document per (language, phrase). Built by `utils/phrase_index/builder.py`.
+
+**Canonical phrase form**: `" ".join(tokenize_verse(text))` — single space, no normalization beyond what the tokenizer produces. The builder and the query tool must agree on this form; a mismatch silently returns zero hits.
+
+### Indexes
+
+```javascript
+{ "language_code": 1, "phrase": 1 }  // unique: true, name: "phrase_lookup"
+```
+
+### Schema
+
+```javascript
+{
+  "_id": ObjectId,
+  "language_code": String,
+  "phrase": String,
+  "n": Number,              // Phrase length in words (4)
+  "df": Number,             // Document frequency — verses containing this phrase
+  "min_word_df": Number,    // Lowest single-word document frequency among the phrase's words
+  "locations": [            // Verse locations containing this phrase
+    { "book_code": String, "chapter": Number, "verse": Number }
+  ],
+  "last_rebuilt": ISODate
 }
 ```
 
@@ -704,25 +657,3 @@ AI chat conversation history. One document per conversation, with embedded messa
 | dictionaries | 1 | 1 |
 | grammar_systems | 1 | 1 |
 | **Total** | **69** | **69** |
-
----
-
-## Migration Notes
-
-The MongoDB migration from the original PostgreSQL prototype is complete. The current approach uses:
-
-- Single database with language-based filtering
-- Embedded documents for chapters/verses in `bible_books`
-- Separate indexed collection (`bible_texts`) for verse-level queries
-- Flexible schema for grammar categories
-
-
-##  USFM Import for English NET (Base Language)
-
-
-cd /filepath/back_end
-
-# Import entire eng-web directory
-python -m utils.usfm_parser.usfm_importer \
-    ../data/bibles/eng-web_usfm/ \
-    english

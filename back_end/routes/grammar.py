@@ -11,7 +11,7 @@ Provides endpoints to:
 from fastapi import APIRouter, HTTPException, Path, Body, Depends
 from pydantic import BaseModel, Field
 from typing import List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from db_connector.connection import MongoDBConnector
@@ -227,7 +227,7 @@ async def update_grammar_category(
                 "language_code": language_code,
                 "language_name": language_code.replace('_', ' ').title(),
                 "grammar_system_name": f"{language_code.replace('_', ' ').title()} Grammar System",
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
                 "categories": {
                     cat: {
                         "description": "",
@@ -245,7 +245,7 @@ async def update_grammar_category(
             }
             await grammar_systems.insert_one(new_doc)
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Update the specific category with rich structures
         result = await grammar_systems.update_one(
@@ -343,7 +343,7 @@ async def verify_grammar_category(
             {
                 "$set": {
                     f"categories.{category_name}.human_verified": request.human_verified,
-                    f"categories.{category_name}.updated_at": datetime.utcnow()
+                    f"categories.{category_name}.updated_at": datetime.now(timezone.utc)
                 }
             }
         )
@@ -443,7 +443,7 @@ async def verify_grammar_subcategory(
             {
                 "$set": {
                     f"categories.{category_name}.subcategories.{index}.human_verified": request.human_verified,
-                    f"categories.{category_name}.updated_at": datetime.utcnow()
+                    f"categories.{category_name}.updated_at": datetime.now(timezone.utc)
                 }
             }
         )
@@ -542,7 +542,7 @@ async def verify_grammar_note(
             {
                 "$set": {
                     f"categories.{category_name}.notes.{index}.human_verified": request.human_verified,
-                    f"categories.{category_name}.updated_at": datetime.utcnow()
+                    f"categories.{category_name}.updated_at": datetime.now(timezone.utc)
                 }
             }
         )
@@ -640,7 +640,7 @@ async def verify_grammar_example(
             {
                 "$set": {
                     f"categories.{category_name}.examples.{index}.human_verified": request.human_verified,
-                    f"categories.{category_name}.updated_at": datetime.utcnow()
+                    f"categories.{category_name}.updated_at": datetime.now(timezone.utc)
                 }
             }
         )

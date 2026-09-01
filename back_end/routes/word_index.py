@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from db_connector.connection import MongoDBConnector
 from constants import Collection
 from utils.word_index.builder import build_word_index
-from .dependencies import get_db
+from .dependencies import get_db, api_error
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -41,5 +41,4 @@ async def rebuild_word_index(
         logger.info(f"Word index rebuilt for {request.language_code}: {result['words_indexed']} words")
         return {"success": True, "language_code": request.language_code, **result}
     except Exception as e:
-        logger.error(f"Word index rebuild failed for {request.language_code}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise api_error(f"Word index rebuild for {request.language_code}", e)

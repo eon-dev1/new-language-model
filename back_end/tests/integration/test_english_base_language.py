@@ -10,6 +10,8 @@ the seed_english_language.py script.
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 class TestEnglishBaseLanguage:
     """Tests for English as base language in languages collection."""

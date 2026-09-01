@@ -294,36 +294,76 @@ TEST_LANGUAGE_NOTES = [
         "notes": [
             {
                 "id": "note-1",
+                # Titles derived mechanically from text by the migration's
+                # _derive_title rule (≤60 chars → verbatim). Keeps the same
+                # search-hit counts the legacy tests assert against.
+                "title": "Hebrew uses right-to-left script",
                 "text": "Hebrew uses right-to-left script",
                 "created_at": datetime(2024, 1, 1),
                 "updated_at": datetime(2024, 3, 1),
             },
             {
                 "id": "note-2",
+                "title": "Verb conjugation changes by gender",
                 "text": "Verb conjugation changes by gender",
                 "created_at": datetime(2024, 1, 2),
                 "updated_at": datetime(2024, 2, 1),
             },
             {
                 "id": "note-3",
+                "title": "Nouns have masculine and feminine forms",
                 "text": "Nouns have masculine and feminine forms",
                 "created_at": datetime(2024, 1, 3),
                 "updated_at": datetime(2024, 1, 20),
             },
             {
                 "id": "note-4",
+                "title": "Construct state links two nouns",
                 "text": "Construct state links two nouns",
                 "created_at": datetime(2024, 1, 4),
                 "updated_at": datetime(2024, 1, 15),
             },
             {
                 "id": "note-5",
+                "title": "Definite article ha- prefixed to noun",
                 "text": "Definite article ha- prefixed to noun",
                 "created_at": datetime(2024, 1, 5),
                 "updated_at": datetime(2024, 1, 10),
             },
         ],
-    }
+    },
+    {
+        # Separate doc so heb's count assertions (total=5) stay valid while
+        # giving the title-only / dedup search tests a dedicated surface.
+        "_id": "notes_bughotu",
+        "language_code": "bughotu",
+        "notes": [
+            {
+                "id": "bn-1",
+                # "telicity" appears only in title — body has no match
+                "title": "telicity marker overview",
+                "text": "Aspect particles indicate event completion",
+                "created_at": datetime(2024, 1, 1),
+                "updated_at": datetime(2024, 1, 1),
+            },
+            {
+                "id": "bn-2",
+                # "aspect" appears in both title and body → must dedup to 1 hit
+                "title": "aspect overview",
+                "text": "aspect marking is suffixal",
+                "created_at": datetime(2024, 1, 2),
+                "updated_at": datetime(2024, 1, 2),
+            },
+            {
+                "id": "bn-3",
+                # "suffixal" appears only in body — title has no match
+                "title": "morphology essentials",
+                "text": "Verb agreement is suffixal not prefixal",
+                "created_at": datetime(2024, 1, 3),
+                "updated_at": datetime(2024, 1, 3),
+            },
+        ],
+    },
 ]
 
 TEST_CORRECTION_LOG = [

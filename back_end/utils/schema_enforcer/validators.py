@@ -159,6 +159,55 @@ def validate_required_fields(doc: dict, schema: dict) -> list[str]:
     return issues
 
 
+def validate_embedded_schema(doc: dict, schema: dict, collection_name: str) -> list[str]:
+    """
+    Recurse into a collection schema's `embedded_schema` block, validating
+    each declared embedded field's contents against its own sub-schema.
+
+    A field is treated as a list of embedded documents or a single embedded
+    document based on `required_fields[field_name]` in the parent schema
+    (list vs dict) — NOT by inspecting the value at runtime. Two sibling
+    fields in the same schema (e.g. bible_books.chapters is a list,
+    bible_books.metadata is a dict) must be handled differently, and a
+    value-based guess would silently misvalidate one of them.
+
+    Args:
+        doc: MongoDB document to validate
+        schema: Schema dict from EXPECTED_COLLECTIONS
+        collection_name: Name of collection (for prefixing issue messages)
+
+    Returns:
+        List of issues (empty if valid or nothing to recurse into)
+    """
+    issues = []
+    embedded_schema = schema.get("embedded_schema", {})
+    required_fields = schema.get("required_fields", {})
+
+    for field_name, sub_schema in embedded_schema.items():
+        value = doc.get(field_name)
+        if value is None:
+            continue
+
+        field_type = required_fields.get(field_name)
+
+        if field_type is list:
+            if not isinstance(value, list):
+                continue
+            for item in value:
+                if not isinstance(item, dict):
+                    continue
+                for sub_issue in validate_required_fields(item, sub_schema):
+                    issues.append(f"{collection_name}.{field_name}[]: {sub_issue}")
+        elif field_type is dict:
+            if not isinstance(value, dict):
+                continue
+            for sub_issue in validate_required_fields(value, sub_schema):
+                issues.append(f"{collection_name}.{field_name}: {sub_issue}")
+        # else: field type not declared as list or dict — nothing safe to recurse into
+
+    return issues
+
+
 def validate_document(doc: dict, schema: dict, collection_name: str) -> list[str]:
     """
     Full validation of a document against its schema.
@@ -175,6 +224,9 @@ def validate_document(doc: dict, schema: dict, collection_name: str) -> list[str
 
     # Required fields
     issues.extend(validate_required_fields(doc, schema))
+
+    # Embedded-list/dict shape drift
+    issues.extend(validate_embedded_schema(doc, schema, collection_name))
 
     # Collection-specific validations
     if collection_name == "bible_texts":

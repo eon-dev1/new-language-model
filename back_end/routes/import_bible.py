@@ -8,7 +8,7 @@ Imports USFM Bible files from a directory into MongoDB.
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from db_connector.connection import MongoDBConnector
@@ -17,6 +17,7 @@ from utils.usfm_parser.usfm_importer import (
     sync_bible_books_from_texts
 )
 from utils.word_index.builder import build_word_index
+from utils.phrase_index.builder import build_phrase_index
 from constants import Collection
 from .dependencies import get_db, api_error
 
@@ -109,7 +110,7 @@ async def import_bible(
                 "language_name": request.language_name,
                 "language_code": request.language_code,
                 "is_base_language": False,
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
                 "status": "active",
                 "bible_books_count": result.books_processed,
                 "total_verses": total_verses,
@@ -118,7 +119,7 @@ async def import_bible(
                     "books_completed": 0,
                     "verses_translated": total_verses,
                     "verses_verified": verses_verified,
-                    "last_updated": datetime.utcnow()
+                    "last_updated": datetime.now(timezone.utc)
                 },
                 "metadata": {
                     "creator": "import_usfm_endpoint",
@@ -132,11 +133,11 @@ async def import_bible(
             await languages_collection.update_one(
                 {"language_code": request.language_code},
                 {"$set": {
-                    "updated_at": datetime.utcnow(),
+                    "updated_at": datetime.now(timezone.utc),
                     "translation_stats.verses_translated": total_verses,
                     "translation_stats.books_started": result.books_processed,
                     "translation_stats.verses_verified": verses_verified,
-                    "translation_stats.last_updated": datetime.utcnow()
+                    "translation_stats.last_updated": datetime.now(timezone.utc)
                 }}
             )
             logger.info(f"Updated language document for {request.language_name}")
@@ -147,6 +148,18 @@ async def import_bible(
             logger.info(f"Word index rebuilt: {idx['words_indexed']} words in {idx['duration_ms']}ms")
         except Exception as idx_err:
             logger.warning(f"Word index rebuild failed (non-fatal): {idx_err}")
+
+        # Rebuild phrase index for the imported target language.
+        # Verified-only filter applies inside the builder; if the import set
+        # human_verified=False everywhere, this emits an empty index — which
+        # is the correct behavior.
+        try:
+            pidx = await build_phrase_index(db, request.language_code)
+            logger.info(
+                f"Phrase index rebuilt: {pidx['phrases_emitted']} phrases in {pidx['duration_ms']}ms"
+            )
+        except Exception as pidx_err:
+            logger.warning(f"Phrase index rebuild failed (non-fatal): {pidx_err}")
 
         # Sync bible_books metadata from imported bible_texts
         try:

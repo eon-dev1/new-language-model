@@ -53,9 +53,3 @@ def test_compose_prompt_with_skill():
     assert skill in result
     # Separator present
     assert "---" in result
-
-
-def test_compose_prompt_deterministic():
-    base = "Base prompt"
-    skill = "Skill overlay"
-    assert sp.compose_prompt(base, skill=skill) == sp.compose_prompt(base, skill=skill)

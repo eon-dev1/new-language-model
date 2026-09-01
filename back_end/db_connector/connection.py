@@ -41,8 +41,9 @@ class MongoDBConnector:
             # Get database reference
             self._database = self._client[self.settings.database_name]
 
-            # Test the connection
-            await self._client.admin.command('ping')
+            # ping succeeds unauthenticated under --auth; a real read on the
+            # target db does not, so use that as the connection test instead.
+            await self._client[self.settings.database_name].list_collection_names()
             self._is_connected = True
             
             logger.debug(f"✅ MongoDB connection established successfully to database: {self.settings.database_name}")
@@ -93,21 +94,19 @@ class MongoDBConnector:
                 server_info = await self._client.server_info()
                 health_info["server_info"] = {
                     "version": server_info.get("version"),
-                    "platform": server_info.get("platform", "unknown")
                 }
-                
+
                 # Count collections
                 collection_names = await self._database.list_collection_names()
                 health_info["collections_count"] = len(collection_names)
-                health_info["collections"] = collection_names[:10]  # First 10 for brevity
             else:
                 health_info["error"] = "Failed to establish connection"
             
             health_info["connected"] = True
             
-        except Exception as e:
-            logger.error(f"Health check failed: {e}")
-            health_info["error"] = str(e)
+        except Exception:
+            logger.exception("Health check failed")
+            health_info["error"] = "Health check failed"
         
         return health_info
     
@@ -154,11 +153,12 @@ _global_connector: Optional[MongoDBConnector] = None
 async def get_mongodb_connector() -> MongoDBConnector:
     """Get global MongoDB connector instance"""
     global _global_connector
-    
+
     if _global_connector is None:
-        _global_connector = MongoDBConnector()
-        await _global_connector.connect()
-    
+        connector = MongoDBConnector()
+        await connector.connect()
+        _global_connector = connector
+
     return _global_connector
 
 async def close_mongodb_connector() -> None:

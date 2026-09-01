@@ -47,8 +47,13 @@ if [[ ! -x "${SERVER_BIN}" ]]; then
     echo "Error: llama-server binary not found at ${SERVER_BIN}"
     echo "Please build llama.cpp first:"
     echo "  cd ${LLAMA_CPP}/build"
-    echo "  cmake .. -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=\"120\" -DLLAMA_CURL=OFF"
-    echo "  make -j\$(nproc)"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        echo "  cmake .. -DGGML_METAL=ON -DLLAMA_CURL=OFF"
+        echo "  make -j\$(sysctl -n hw.logicalcpu)"
+    else
+        echo "  cmake .. -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=\"120\" -DLLAMA_CURL=OFF"
+        echo "  make -j\$(nproc)"
+    fi
     exit 1
 fi
 

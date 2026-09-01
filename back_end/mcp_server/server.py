@@ -12,6 +12,9 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from db_connector.connection import MongoDBConnector
+from shared.logging_setup import install_logging
+
+install_logging()
 
 # Import tool functions
 from mcp_server.tools.language import list_languages as _list_languages
@@ -30,6 +33,7 @@ from mcp_server.tools.grammar import update_grammar_category as _update_grammar_
 from mcp_server.tools.word_index import get_word_index as _get_word_index
 from mcp_server.tools.word_index import get_words_not_in_dictionary as _get_words_not_in_dictionary
 from mcp_server.tools.word_index import get_word_frequency_list as _get_word_frequency_list
+from mcp_server.tools.phrase_index import get_phrase_context as _get_phrase_context
 from mcp_server.tools.memories import list_language_notes as _list_language_notes
 from mcp_server.tools.memories import search_language_notes as _search_language_notes
 from mcp_server.tools.memories import list_correction_log as _list_correction_log
@@ -47,8 +51,9 @@ async def get_db() -> MongoDBConnector:
     """Get database connector, initializing if needed."""
     global _db
     if _db is None:
-        _db = MongoDBConnector()
-        await _db.connect()
+        connector = MongoDBConnector()
+        await connector.connect()
+        _db = connector
     return _db
 
 
@@ -433,6 +438,53 @@ async def get_word_frequency_list(
     """
     db = await get_db()
     return await _get_word_frequency_list(db, language_code, top_n)
+
+
+# =============================================================================
+# Phrase Index Tool
+# =============================================================================
+
+
+@mcp.tool()
+async def get_phrase_context(
+    language_code: str,
+    text: str,
+    location_text_language: str | None = None,
+    book_code: str | None = None,
+    chapter: int | None = None,
+    verse: int | None = None,
+    min_word_df_max: int = 200,
+    max_locations_per_phrase: int = 10,
+) -> dict[str, Any]:
+    """
+    Find recurring distinctive 4-grams in `text` and where else they appear.
+
+    Two use cases:
+      (a) Cross-lingual reuse: pass English text with language_code="english"
+          and location_text_language="<target>" — get English 4-grams with
+          verified target translations at other locations.
+      (b) Intra-target consistency: pass a target-language draft with
+          language_code="<target>" and default location_text_language.
+
+    Args:
+        language_code: Language of `text`; selects which phrase_index to query
+        text: Text to scan (max 50K chars)
+        location_text_language: Language to fetch location text in
+            (defaults to language_code)
+        book_code, chapter, verse: Optional self-reference exclusion
+            (all-or-nothing)
+        min_word_df_max: Scaffolding filter — keep only phrases whose rarest
+            token appears in <= N verses (default 200)
+        max_locations_per_phrase: Cap locations per phrase (default 10)
+
+    Returns phrases ordered by min_word_df asc, df desc. Empty is a normal
+    result.
+    """
+    db = await get_db()
+    return await _get_phrase_context(
+        db, language_code, text, location_text_language,
+        book_code, chapter, verse, min_word_df_max, max_locations_per_phrase,
+    )
 
 
 # =============================================================================

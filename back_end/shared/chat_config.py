@@ -22,9 +22,7 @@ CONFIG_FILE = CONFIG_DIR / "chat_config.json"
 # DEFAULT_CONFIG doubles as the allowlist for update_config() —
 # only keys present here are accepted when saving config updates.
 DEFAULT_CONFIG = {
-    "llm_provider": "anthropic",
-    "anthropic_api_key": "",
-    "anthropic_model": "claude-sonnet-4-6",
+    "llm_provider": "openrouter",
     "openrouter_api_key": "",
     "openrouter_model": "anthropic/claude-sonnet-4.6",
     "local_base_url": "http://127.0.0.1:8080",
@@ -51,9 +49,27 @@ def load_config() -> dict[str, Any]:
 
     try:
         data = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+
+        # (1) One-time secret hygiene — gated on stale CREDENTIAL keys.
+        # Fires at most once: after the pop the keys are gone, and neither
+        # the frontend (field removed) nor update_config (allowlist no longer
+        # contains them) can re-introduce them.
+        if "anthropic_api_key" in data or "anthropic_model" in data:
+            if data.get("llm_provider") == "anthropic":
+                data["llm_provider"] = "openrouter"
+            data.pop("anthropic_api_key", None)
+            data.pop("anthropic_model", None)
+            save_config(data)
+
         # Merge with defaults to handle new keys added in future versions
         merged = dict(DEFAULT_CONFIG)
         merged.update(data)
+
+        # (2) Runtime correctness — pure in-memory coercion, every call, no I/O.
+        # Guarantees get_provider()/get_context_window() never see "anthropic".
+        if merged.get("llm_provider") == "anthropic":
+            merged["llm_provider"] = "openrouter"
+
         return merged
     except (json.JSONDecodeError, OSError) as e:
         logger.warning(f"Failed to load chat config, using defaults: {e}")
@@ -95,14 +111,10 @@ def get_public_config() -> dict[str, Any]:
     Masks the API key -- never expose the full key to the renderer.
     """
     config = load_config()
-    api_key = config.get("anthropic_api_key", "")
     openrouter_key = config.get("openrouter_api_key", "")
 
     return {
         "llm_provider": config["llm_provider"],
-        "anthropic_model": config["anthropic_model"],
-        "has_api_key": bool(api_key),
-        "api_key_preview": f"...{api_key[-4:]}" if len(api_key) > 4 else "",
         "has_openrouter_key": bool(openrouter_key),
         "openrouter_key_preview": f"...{openrouter_key[-4:]}" if len(openrouter_key) > 4 else "",
         "openrouter_model": config.get("openrouter_model", "anthropic/claude-sonnet-4.6"),

@@ -332,3 +332,44 @@ describe('Test 2 — Edit-then-revert: comment field hidden', () => {
     expect(corrections).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Test 9 — Submitted entries must NOT carry human_verified (regression)
+// ---------------------------------------------------------------------------
+
+describe('Test 9 — human_verified is never sent from the client', () => {
+  it('omits human_verified from submitted entries so backend validation passes', () => {
+    const onApprove = vi.fn();
+    const onReject = vi.fn();
+    const onSubmitDictionary = vi.fn();
+
+    render(
+      <ToolApprovalCard
+        approval={mockDictApproval}
+        onApprove={onApprove}
+        onReject={onReject}
+        onSubmitDictionary={onSubmitDictionary}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('entry-0-approve'));
+    fireEvent.click(screen.getByTestId('entry-1-approve'));
+    fireEvent.click(screen.getByTestId('entry-2-approve'));
+    fireEvent.click(screen.getByTestId('dict-submit'));
+
+    const [, modifiedInput] = onSubmitDictionary.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+      unknown[],
+    ];
+    const entries = modifiedInput.entries as Array<Record<string, unknown>>;
+
+    // The backend's CreateEntryRequest is extra="forbid" and has no human_verified
+    // field — it forces the flag server-side instead. A client that sends it makes
+    // every save fail validation, which is exactly the bug this pins down.
+    expect(entries.length).toBe(3);
+    for (const entry of entries) {
+      expect(entry).not.toHaveProperty('human_verified');
+    }
+  });
+});

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from db_connector.settings import MongoDBSettings
-from .dependencies import get_db_settings
+from .dependencies import get_db_settings, api_error
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -67,8 +67,7 @@ async def backup_database(
         if not os.path.isfile(mongodump_path):
             raise HTTPException(
                 status_code=500,
-                detail=f"mongodump binary not found at {mongodump_path}. "
-                        "Run 'npm run prepare:mongo' in front_end/ to download MongoDB tools."
+                detail="mongodump binary not found. Run 'npm run prepare:mongo' in front_end/ to download MongoDB tools."
             )
 
         # 3. Create timestamped subdirectory name
@@ -143,7 +142,7 @@ async def backup_database(
             logger.error(f"mongodump failed with code {proc.returncode}: {stderr_text}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Backup failed: {stderr_text}"
+                detail="Backup failed"
             )
 
         # 7. Success
@@ -161,8 +160,4 @@ async def backup_database(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Backup failed with unexpected error: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Backup failed: {str(e)}"
-        )
+        raise api_error("Backup", e)

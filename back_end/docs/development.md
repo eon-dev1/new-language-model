@@ -5,7 +5,7 @@
 ### Prerequisites
 
 - Python 3.10 or higher
-- MongoDB Atlas account (or local MongoDB 7.0+)
+- Local MongoDB 7.0+ (bundled `mongod` — see [configuration.md](./configuration.md#local-development-setup))
 
 ### Initial Setup
 
@@ -31,12 +31,7 @@
    pip install -r requirements.txt
    ```
 
-4. **Configure credentials** (see [configuration.md](./configuration.md)):
-   ```bash
-   mkdir -p ~/.nlm
-   echo 'MONGODB_CONNECTION_STRING="mongodb://localhost:27019"' > ~/.nlm/mongodb_credentials.env
-   chmod 600 ~/.nlm/mongodb_credentials.env
-   ```
+4. **Configure credentials** — see [configuration.md](./configuration.md) for the credentials file format and local `mongod` setup.
 
 5. **Verify setup**:
    ```bash
@@ -87,7 +82,6 @@ back_end/
 |   |-- test_usfm_book_codes.py
 |   |-- test_usfm_importer.py
 |   |-- test_remove_usfm_markers.py
-|   |-- test_html_parser.py
 |   |-- unit/
 |       |-- db_connector/
 |           |-- conftest.py
@@ -262,129 +256,6 @@ async def find_language(code: str) -> Optional[Dict[str, Any]]:
 
 ---
 
-## Adding New Routes
-
-### Step-by-Step Guide
-
-1. **Create route file** in `routes/`:
-   ```python
-   # routes/my_feature.py
-   from fastapi import APIRouter, HTTPException
-   from typing import Dict
-   import logging
-
-   router = APIRouter()
-   logger = logging.getLogger('api')
-
-   @router.get("/my-endpoint", response_model=Dict[str, str])
-   async def my_endpoint():
-       """
-       Endpoint description.
-
-       Returns:
-           dict: Response data
-       """
-       return {"status": "ok"}
-   ```
-
-2. **Register in main.py**:
-   ```python
-   from routes.my_feature import router as my_feature_router
-
-   app.include_router(my_feature_router, prefix="/api")
-   ```
-
-3. **Add tests**:
-   ```python
-   # tests/test_my_feature.py
-   import pytest
-   from fastapi.testclient import TestClient
-   from main import app
-
-   client = TestClient(app)
-
-   def test_my_endpoint():
-       response = client.get("/api/my-endpoint")
-       assert response.status_code == 200
-   ```
-
-### Route Handler Template
-
-```python
-# routes/resource.py
-
-from fastapi import APIRouter, HTTPException, Query, Path
-from typing import Dict, List, Optional
-from pydantic import BaseModel
-import logging
-from datetime import datetime
-
-from db_connector.connection import MongoDBConnector
-
-router = APIRouter()
-logger = logging.getLogger('api')
-
-# Request/Response Models
-class ResourceCreate(BaseModel):
-    name: str
-    description: Optional[str] = None
-
-class ResourceResponse(BaseModel):
-    id: str
-    name: str
-    created_at: datetime
-
-# Routes
-@router.post("/resources", response_model=ResourceResponse)
-async def create_resource(data: ResourceCreate):
-    """Create a new resource."""
-    connector = None
-    try:
-        connector = MongoDBConnector()
-        await connector.connect()
-        db = connector.get_database()
-
-        doc = {
-            "name": data.name,
-            "description": data.description,
-            "created_at": datetime.utcnow()
-        }
-
-        result = await db.resources.insert_one(doc)
-
-        return ResourceResponse(
-            id=str(result.inserted_id),
-            name=data.name,
-            created_at=doc["created_at"]
-        )
-
-    except Exception as e:
-        logger.error(f"Error creating resource: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if connector:
-            await connector.disconnect()
-
-@router.get("/resources/{resource_id}", response_model=ResourceResponse)
-async def get_resource(
-    resource_id: str = Path(..., description="Resource ID")
-):
-    """Get a resource by ID."""
-    # Implementation...
-    pass
-
-@router.get("/resources", response_model=List[ResourceResponse])
-async def list_resources(
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
-):
-    """List all resources with pagination."""
-    # Implementation...
-    pass
-```
-
----
-
 ## Working with MongoDB
 
 ### Using MongoDBConnector
@@ -434,128 +305,6 @@ async def example_global():
     connector = await get_mongodb_connector()
     db = connector.get_database()
     return await db.languages.find().to_list(100)
-```
-
-### Common MongoDB Operations
-
-```python
-# Find with filter
-docs = await collection.find({"status": "active"}).to_list(100)
-
-# Find one
-doc = await collection.find_one({"language_code": "kope"})
-
-# Insert many
-result = await collection.insert_many([
-    {"name": "doc1"},
-    {"name": "doc2"}
-])
-
-# Update many
-result = await collection.update_many(
-    {"status": "pending"},
-    {"$set": {"status": "processed"}}
-)
-
-# Aggregation
-pipeline = [
-    {"$match": {"language_code": "kope"}},
-    {"$group": {"_id": "$book_code", "count": {"$sum": 1}}}
-]
-async for doc in collection.aggregate(pipeline):
-    print(doc)
-
-# Create index
-await collection.create_index([("language_code", 1), ("book_code", 1)])
-```
-
----
-
-## Writing Tests
-
-### Test Structure
-
-```python
-# tests/test_feature.py
-
-import pytest
-import asyncio
-from unittest.mock import Mock, AsyncMock, patch
-
-class TestMyFeature:
-    """Tests for my feature."""
-
-    @pytest.fixture(autouse=True)
-    def setup(self):
-        """Setup for each test."""
-        self.test_data = {"name": "test"}
-
-    def test_synchronous_function(self):
-        """Test a synchronous function."""
-        result = my_sync_function("input")
-        assert result == "expected"
-
-    @pytest.mark.asyncio
-    async def test_async_function(self):
-        """Test an async function."""
-        result = await my_async_function("input")
-        assert result == "expected"
-
-    @pytest.mark.parametrize("input,expected", [
-        ("a", 1),
-        ("b", 2),
-        ("c", 3),
-    ])
-    def test_multiple_inputs(self, input, expected):
-        """Test with multiple inputs."""
-        assert my_function(input) == expected
-
-# Fixtures
-@pytest.fixture
-def mock_connector():
-    """Provide a mock MongoDB connector."""
-    connector = Mock()
-    connector.get_database = Mock(return_value=Mock())
-    connector.is_connected = True
-    return connector
-
-@pytest.fixture
-async def async_mock_connector():
-    """Provide an async mock MongoDB connector."""
-    connector = AsyncMock()
-    connector.connect = AsyncMock()
-    connector.disconnect = AsyncMock()
-    return connector
-```
-
-### Mocking Database Calls
-
-```python
-import pytest
-from unittest.mock import AsyncMock, patch
-
-@pytest.mark.asyncio
-async def test_with_mocked_db():
-    # Mock the connector
-    mock_db = AsyncMock()
-    mock_db.languages.find_one = AsyncMock(return_value={
-        "language_code": "kope",
-        "status": "active"
-    })
-
-    with patch('routes.my_route.MongoDBConnector') as MockConnector:
-        mock_instance = AsyncMock()
-        mock_instance.get_database.return_value = mock_db
-        mock_instance.connect = AsyncMock()
-        mock_instance.disconnect = AsyncMock()
-        MockConnector.return_value = mock_instance
-
-        # Call your function
-        result = await my_function("kope")
-
-        # Assertions
-        assert result["status"] == "active"
-        mock_db.languages.find_one.assert_called_once()
 ```
 
 ---
@@ -637,43 +386,9 @@ asyncio.run(test())
 
 ---
 
-## Git Workflow
-
-### Branch Naming
-
-```
-feature/add-language-endpoint
-bugfix/fix-connection-timeout
-refactor/improve-error-handling
-docs/update-api-reference
-```
-
-### Commit Messages
-
-Follow conventional commits:
-
-```
-feat: add language creation endpoint
-fix: resolve connection timeout issue
-docs: update API documentation
-refactor: improve error handling in routes
-test: add tests for language repository
-chore: update dependencies
-```
-
-### Pre-Commit Checklist
+## Pre-Commit Checklist
 
 1. Run tests: `pytest`
 2. Check types (if using mypy): `mypy .`
 3. Format code (if using black): `black .`
 4. Lint (if using flake8): `flake8 .`
-
----
-
-## Useful Resources
-
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Motor Documentation](https://motor.readthedocs.io/)
-- [MongoDB Manual](https://www.mongodb.com/docs/manual/)
-- [Pydantic Documentation](https://docs.pydantic.dev/)
-- [pytest Documentation](https://docs.pytest.org/)

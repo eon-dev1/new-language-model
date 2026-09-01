@@ -39,12 +39,12 @@ def get_context_window() -> int:
     from shared import model_registry
 
     config = load_config()
-    provider_type = config.get("llm_provider", "anthropic")
+    provider_type = config.get("llm_provider", "openrouter")
 
     if provider_type == "local":
         return config.get("local_context_window", LOCAL_DEFAULT_CONTEXT)
 
-    model_key = "openrouter_model" if provider_type == "openrouter" else "anthropic_model"
+    model_key = "openrouter_model"
     return model_registry.get_context_window(config.get(model_key, ""))
 
 
@@ -247,11 +247,13 @@ async def run_tool_loop(
                     "content": result_str,
                 })
             except Exception as e:
-                logger.error(f"Tool call error ({name}): {e}")
+                logger.exception(f"Tool call error ({name})")
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tc["id"],
-                    "content": json.dumps({"error": str(e)}),
+                    # Exception class only — enough for the model to tell a malformed-argument
+                    # TypeError from a data-layer failure, without relaying exception text.
+                    "content": json.dumps({"error": f"Tool '{name}' failed ({type(e).__name__})"}),
                 })
 
         # If a write tool needs approval, save state and pause

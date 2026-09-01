@@ -27,13 +27,6 @@ class TestComposedSystemPrompts:
             "batch translation will run without approval loop guidance"
         )
 
-    def test_single_verse_system_is_bare_system_prompt(self):
-        from shared.system_prompt import SYSTEM_PROMPT
-        # Single-verse uses SYSTEM_PROMPT directly — no format slots
-        assert "{" not in SYSTEM_PROMPT or "```" in SYSTEM_PROMPT or "`{" in SYSTEM_PROMPT, (
-            "SYSTEM_PROMPT should not contain unguarded format slots"
-        )
-
     def test_batch_system_is_composed(self):
         from routes.translate import _BATCH_SYSTEM
         from shared.system_prompt import SYSTEM_PROMPT

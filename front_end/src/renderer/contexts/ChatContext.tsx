@@ -179,7 +179,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return null;
   });
   const [currentModel, setCurrentModel] = useState<string | null>(null);
-  const [currentProvider, setCurrentProvider] = useState<string>('anthropic');
+  const [currentProvider, setCurrentProvider] = useState<string>('openrouter');
   const [thinkingEnabled, setThinkingEnabled] = useState<boolean>(true);
   const [availableSkills, setAvailableSkills] = useState<QuickActionSkill[]>([]);
   const [toolResultBuffer, setToolResultBuffer] = useState<ToolResultEntry[]>([]);
@@ -246,9 +246,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const refreshCurrentModel = useCallback(async () => {
     try {
       const cfg = await fetchChatConfig();
-      const model = cfg.llm_provider === 'openrouter' ? cfg.openrouter_model
-        : cfg.llm_provider === 'local' ? cfg.local_model
-        : cfg.anthropic_model;
+      const model = cfg.llm_provider === 'local' ? cfg.local_model
+        : cfg.openrouter_model;
       setCurrentModel(model);
       setCurrentProvider(cfg.llm_provider);
       setThinkingEnabled(cfg.thinking_enabled ?? true);

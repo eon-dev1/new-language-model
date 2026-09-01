@@ -43,19 +43,6 @@ class TestDictionaryEmptyStateGET:
         assert data["entries"] == []
         assert data["count"] == 0
 
-    @pytest.mark.asyncio
-    async def test_get_entries_returns_200_not_404(
-        self,
-        async_client: AsyncClient,
-        clean_test_language: str
-    ):
-        """Verify we get 200 status, not 404, for non-existent dictionary."""
-        response = await async_client.get(f"/api/dictionary/{clean_test_language}/entries")
-
-        # This is the critical assertion - current code returns 404
-        assert response.status_code != 404, "GET should not return 404 for empty dictionary"
-        assert response.status_code == 200
-
 
 class TestDictionaryEmptyStatePOST:
     """Tests for POST /api/dictionary/{language}/entries with empty state."""

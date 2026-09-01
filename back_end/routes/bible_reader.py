@@ -13,12 +13,13 @@ import re
 from fastapi import APIRouter, HTTPException, Path, Query, Depends
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from db_connector.connection import MongoDBConnector, get_mongodb_connector
 from constants import Collection
 from utils.word_index.builder import build_word_index
+from utils.phrase_index import scheduler as phrase_index_scheduler
 from .dependencies import get_db, api_error
 
 # Lock to prevent concurrent word index rebuilds
@@ -224,7 +225,7 @@ async def update_verse_verification(
             {
                 "$set": {
                     "human_verified": request.human_verified,
-                    "updated_at": datetime.utcnow()
+                    "updated_at": datetime.now(timezone.utc)
                 }
             }
         )
@@ -244,6 +245,10 @@ async def update_verse_verification(
         )
 
         logger.info(f"Updated verification for {language_code}/{normalized_book_code} {chapter}:{verse} to {request.human_verified}")
+
+        # Schedule a debounced phrase_index rebuild. English short-circuits
+        # inside schedule(); no-op for base language.
+        await phrase_index_scheduler.schedule(language_code)
 
         return VerifyVerseResponse(
             success=True,
@@ -272,7 +277,8 @@ async def update_verse_text(
     """
     Update the translated text for a specific verse.
 
-    Auto-marks the verse as human_verified = true since human edited it.
+    Sets human_verified=True when text is non-empty; False when text is empty
+    or whitespace-only (clearing a verse un-verifies it).
 
     Args:
         language: Target language code
@@ -292,10 +298,16 @@ async def update_verse_text(
         language_code = language.lower().replace(' ', '_').replace('-', '_')
         normalized_book_code = book_code.strip()
 
+        raw_text = request.translated_text or ""
+        normalized_text = raw_text.strip()
+        is_cleared = normalized_text == ""
+        stored_text = "" if is_cleared else raw_text
+        human_verified = not is_cleared
+
         database = db.get_database()
         bible_texts = database[Collection.BIBLE_TEXTS]
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         await bible_texts.update_one(
             {
                 "language_code": language_code,
@@ -305,8 +317,8 @@ async def update_verse_text(
             },
             {
                 "$set": {
-                    "translated_text": request.translated_text,
-                    "human_verified": True,  # Auto-verify on edit
+                    "translated_text": stored_text,
+                    "human_verified": human_verified,
                     "updated_at": now,
                 },
                 "$setOnInsert": {
@@ -330,14 +342,18 @@ async def update_verse_text(
 
         asyncio.create_task(_rebuild())
 
+        # Schedule a debounced phrase_index rebuild. English short-circuits
+        # inside schedule(); no-op for base language.
+        await phrase_index_scheduler.schedule(language_code)
+
         return UpdateVerseTextResponse(
             success=True,
             language_code=language_code,
             book_code=normalized_book_code,
             chapter=chapter,
             verse=verse,
-            translated_text=request.translated_text,
-            human_verified=True
+            translated_text=stored_text,
+            human_verified=human_verified,
         )
 
     except HTTPException:

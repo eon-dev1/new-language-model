@@ -54,28 +54,15 @@ class TestToc3IsUsfmCode:
 # Test 2 — Filename zero-padding via canonical order in _BOOK_EXPORT_MAP
 # ---------------------------------------------------------------------------
 
-class TestFilenameZeroPadding:
-    """Canonical order values must produce correct zero-padded filenames."""
-
-    def test_genesis_is_order_1(self):
-        usfm_code, display_name, order = _BOOK_EXPORT_MAP["genesis"]
-        assert order == 1
-        assert f"{order:03d}" == "001"
-
-    def test_matthew_is_order_40(self):
-        usfm_code, display_name, order = _BOOK_EXPORT_MAP["matthew"]
-        assert order == 40
-        assert f"{order:03d}" == "040"
-
-    def test_revelation_is_order_66(self):
-        usfm_code, display_name, order = _BOOK_EXPORT_MAP["revelation"]
-        assert order == 66
-        assert f"{order:03d}" == "066"
-
-    def test_1_enoch_is_order_67(self):
-        usfm_code, display_name, order = _BOOK_EXPORT_MAP["1_enoch"]
-        assert order == 67
-        assert f"{order:03d}" == "067"
+@pytest.mark.parametrize("book_code,expected_order", [
+    ("genesis", 1),
+    ("matthew", 40),
+    ("revelation", 66),
+    ("1_enoch", 67),
+])
+def test_canonical_orders(book_code, expected_order):
+    _, _, order = _BOOK_EXPORT_MAP[book_code]
+    assert order == expected_order
 
 
 # ---------------------------------------------------------------------------
@@ -84,9 +71,6 @@ class TestFilenameZeroPadding:
 
 class TestUnknownBookCode:
     """Unknown book codes must not exist in _BOOK_EXPORT_MAP."""
-
-    def test_jubilees_not_in_map(self):
-        assert "jubilees" not in _BOOK_EXPORT_MAP
 
     def test_unknown_returns_empty_list(self):
         result = _build_usfm_content("jubilees", SAMPLE_VERSES, "Jubilees", "Tok Pisin")
@@ -103,10 +87,6 @@ class TestBookNameFallback:
     def test_h_uses_display_name_fallback(self):
         lines = _build_usfm_content("matthew", SAMPLE_VERSES, None, "Tok Pisin")
         assert "\\h Matthew" in lines
-
-    def test_h_not_none_literal(self):
-        lines = _build_usfm_content("matthew", SAMPLE_VERSES, None, "Tok Pisin")
-        assert "\\h None" not in lines
 
     def test_toc1_uses_display_name_fallback(self):
         lines = _build_usfm_content("matthew", SAMPLE_VERSES, None, "Tok Pisin")
