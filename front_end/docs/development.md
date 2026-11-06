@@ -5,7 +5,7 @@ Front-end-specific dev setup, scripts, and testing. For npm install / Python ven
 ## Prerequisites
 
 - Node.js and npm (a current LTS Node works; no `engines` field in `package.json` pins a minimum version)
-- Backend virtual environment set up per the root README (`back_end/nlm_backend_venv`)
+- Backend virtual environment set up per the root README (`<repo>/.venv`, created by `uv sync`)
 
 ## Environment Setup
 

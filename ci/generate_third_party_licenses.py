@@ -2,7 +2,7 @@
 """Regenerate THIRD_PARTY_LICENSES.txt at the repo root.
 
 Collects license metadata + full license text from both the Python backend
-(via pip-licenses, run against back_end/nlm_backend_venv) and the JS frontend
+(via pip-licenses, run against the uv-managed .venv) and the JS frontend
 (via npx license-checker, production deps only), then writes a single combined
 file at the repo root, overwriting any existing one.
 
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,7 +21,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 BACKEND = REPO / "back_end"
 FRONTEND = REPO / "front_end"
-VENV = BACKEND / "nlm_backend_venv"
+# The venv's location varies by machine (<repo>/.venv on the host, absolute in the
+# devcontainer). UV_PROJECT_ENVIRONMENT is the variable uv itself reads, so one setting
+# steers both `uv sync` and this script. Joining onto REPO leaves absolute values as-is.
+VENV = REPO / (os.environ.get("UV_PROJECT_ENVIRONMENT") or ".venv")
 FORMAT_SPEC = Path(__file__).resolve().parent / "license_checker_format.json"
 OUTPUT = REPO / "THIRD_PARTY_LICENSES.txt"
 
@@ -35,18 +39,37 @@ def venv_bin(name: str) -> Path:
     return VENV / "bin" / name
 
 
+# Some wheels bundle non-license binary blobs as their "license file" — e.g.
+# cyclonedx-python-lib ships a marshalled .pyc fragment that pip-licenses will
+# happily emit verbatim. A marshalled code object embeds co_filename, the
+# absolute path of the machine it was built on, so copying such a blob into
+# this file leaks the build machine's directory layout. Real license text never
+# contains control characters, so that's the discriminator; the absolute-path
+# scrub on everything else is belt-and-braces.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_ABS_PATH = re.compile(r"/(?:Users|home|root)/\S+|[A-Za-z]:\\(?:Users|Documents and Settings)\\\S+")
+_UNREADABLE = "(license file in the package is not readable text; consult the URL above)"
+
+
+def _sanitize_license_text(text: str) -> str:
+    if _CONTROL_CHARS.search(text):
+        return _UNREADABLE
+    return _ABS_PATH.sub("<local-path>", text)
+
+
 def collect_backend() -> str:
     pip_licenses = venv_bin("pip-licenses")
     if not pip_licenses.exists():
         raise SystemExit(
             f"pip-licenses not found at {pip_licenses}\n"
-            f"Install it into the venv:\n"
-            f"  {venv_bin('pip')} install pip-licenses"
+            "Create or update the environment with `uv sync` at the repo root."
         )
+    # JSON format (not plain-vertical) so each package's license text can be
+    # sanitized individually; the block layout below reproduces plain-vertical's.
     result = subprocess.run(
         [
             str(pip_licenses),
-            "--format=plain-vertical",
+            "--format=json",
             "--with-license-file",
             "--no-license-path",
             "--with-urls",
@@ -55,7 +78,22 @@ def collect_backend() -> str:
         text=True,
         check=True,
     )
-    return result.stdout
+    packages = json.loads(result.stdout)
+
+    blocks: list[str] = []
+    for pkg in packages:
+        lines = [
+            pkg.get("Name", ""),
+            pkg.get("Version", ""),
+            pkg.get("License", "") or "UNKNOWN",
+        ]
+        url = (pkg.get("URL") or "").strip()
+        if url:
+            lines.append(url)
+        text = _sanitize_license_text(pkg.get("LicenseText") or "")
+        lines += [text or "(no license text bundled with package)", ""]
+        blocks += lines
+    return "\n".join(blocks)
 
 
 def collect_frontend() -> str:
@@ -90,7 +128,7 @@ def collect_frontend() -> str:
 
     blocks: list[str] = []
     for name, info in sorted(data.items()):
-        text = (info.get("licenseText") or "").strip()
+        text = _sanitize_license_text((info.get("licenseText") or "").strip())
         if text == "none":
             text = ""
         blocks += [
@@ -123,7 +161,7 @@ def main() -> int:
         [
             header,
             "\n\n" + "#" * 70,
-            "# BACKEND  (Python, back_end/nlm_backend_venv)",
+            "# BACKEND  (Python, uv-managed .venv)",
             "#" * 70 + "\n",
             backend,
             "\n" + "#" * 70,
@@ -132,6 +170,13 @@ def main() -> int:
             frontend,
         ]
     )
+    # Backstop: if sanitization ever lets a binary blob or absolute path
+    # through, fail loudly instead of writing it into a committed file.
+    if _CONTROL_CHARS.search(body):
+        raise SystemExit("generated output contains control characters; refusing to write")
+    if _ABS_PATH.search(body):
+        raise SystemExit("generated output contains absolute filesystem paths; refusing to write")
+
     OUTPUT.write_text(body, encoding="utf-8")
     print(f"Wrote {OUTPUT} ({OUTPUT.stat().st_size:,} bytes)")
     return 0

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## Unreleased
+
+### Changed
+
+- **Python tooling moved to uv** — one project at the repo root (`pyproject.toml`, committed `uv.lock`, `.python-version` = 3.14.10) replaces `back_end/requirements.txt` and `back_end/nlm_backend_venv/`. The environment is now `<repo>/.venv` (the devcontainer uses `/home/node/.venv` via `UV_PROJECT_ENVIRONMENT`). `npm run setup` runs `uv sync` every time; uv is a new prerequisite, pinned by `required-version`. `exclude-newer = "7 days"` blocks packages published in the last week. The MCP server is launched with `uv run`, and `ci/generate_third_party_licenses.py` reads `UV_PROJECT_ENVIRONMENT` instead of `NLM_BACKEND_VENV`. If `back_end/nlm_backend_venv/` still exists, delete it.
+
+---
+
 ## 2026-08-05 to 2026-08-26
 
 ### Added

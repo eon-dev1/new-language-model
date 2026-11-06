@@ -17,20 +17,20 @@ The NLM (New Language Model) Backend is a FastAPI-based REST API that powers a B
 
 ## Setup
 
-See the [repo root README](../../README.md) for full setup instructions (Python venv, pip install, MongoDB credentials).
+See the [repo root README](../../README.md) for full setup instructions (`uv sync`, MongoDB credentials).
 
 ## Running the Server
 
-Activate the venv first, then:
+Activate the repo-root `.venv` first (or prefix each command with `uv run`), then:
 
 ```bash
 cd back_end
 
 # Standard startup
-python main.py
+uv run python main.py
 
 # With hot reload (development)
-python -m uvicorn main:app --host 127.0.0.1 --port 8221 --reload
+uv run python -m uvicorn main:app --host 127.0.0.1 --port 8221 --reload
 ```
 
 The server binds to `localhost:8221` only (not exposed to external networks).
@@ -55,7 +55,6 @@ Route tests require MongoDB. The test suite auto-starts `mongod` from `~/.nlm/bi
 back_end/
 |-- main.py                     # FastAPI application entry point
 |-- pytest.ini                  # pytest configuration
-|-- requirements.txt            # Python dependencies
 |
 |-- db_connector/               # Database connection layer
 |   |-- connection.py           # MongoDBConnector class (Motor async driver)

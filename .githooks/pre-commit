@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
-exec ci/secrets_detector/secret-scan-staged.sh
+ci/secrets_detector/secret-scan-staged.sh
+ci/machine_path_check.sh --cached

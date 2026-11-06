@@ -130,8 +130,7 @@ MongoDB is bundled with the Electron frontend at `~/.nlm/bin/mongod` (`%USERPROF
 The credential is created by `setup_auth`, not by hand. `npm run setup` runs it for you; to run it directly:
 
 ```bash
-cd back_end && source nlm_backend_venv/bin/activate
-python -m db_connector.setup_auth
+cd back_end && uv run python -m db_connector.setup_auth
 ```
 
 This creates the `nlm_app` user against the bundled `mongod` and writes `~/.nlm/mongodb_credentials.env` (with a generated password, at mode `0600`). It is safe to re-run. See the project README for the full setup, upgrade, and recovery steps.

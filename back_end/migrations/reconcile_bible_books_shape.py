@@ -27,9 +27,8 @@ can race.
 
 Run:
     cd back_end
-    source nlm_backend_venv/bin/activate
-    python -m migrations.reconcile_bible_books_shape            # dry-run
-    python -m migrations.reconcile_bible_books_shape --apply    # write
+    uv run python -m migrations.reconcile_bible_books_shape            # dry-run
+    uv run python -m migrations.reconcile_bible_books_shape --apply    # write
 """
 
 import argparse

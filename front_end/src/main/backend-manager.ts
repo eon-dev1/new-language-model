@@ -55,10 +55,17 @@ export function startBackend(): ChildProcess {
   console.log('[Backend Manager] Starting backend server...');
   console.log(`[Backend Manager ${ts()}] Backend directory:`, shortPath(backendDir));
 
-  // Use Python from the virtual environment
+  // Use Python from the uv-managed virtual environment. UV_PROJECT_ENVIRONMENT is the
+  // same override uv itself reads (the devcontainer sets it so the container never
+  // uses the host's bind-mounted .venv); otherwise uv's default, <repo>/.venv.
+  // Spawned directly rather than via `uv run` so uv need not be on PATH at runtime.
+  const repoRoot = path.resolve(backendDir, '..');
+  const venvDir = process.env.UV_PROJECT_ENVIRONMENT
+    ? path.resolve(repoRoot, process.env.UV_PROJECT_ENVIRONMENT)
+    : path.join(repoRoot, '.venv');
   const venvPython = process.platform === 'win32'
-    ? path.join(backendDir, 'nlm_backend_venv', 'Scripts', 'python.exe')
-    : path.join(backendDir, 'nlm_backend_venv', 'bin', 'python');
+    ? path.join(venvDir, 'Scripts', 'python.exe')
+    : path.join(venvDir, 'bin', 'python');
 
   console.log(`[Backend Manager ${ts()}] Using Python:`, shortPath(venvPython, 3));
 

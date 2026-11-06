@@ -9,7 +9,7 @@
     "jsx": "react-jsx",
     "moduleResolution": "node",
     "outDir": "dist/renderer",
-    "rootDir": "src/renderer"
+    "rootDir": "src"
   },
-  "include": ["src/renderer/**/*", "src/renderer/types.d.ts"]
+  "include": ["src/renderer/**/*", "src/renderer/types.d.ts", "src/components/**/*"]
 }

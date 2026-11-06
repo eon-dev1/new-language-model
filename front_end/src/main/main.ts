@@ -216,7 +216,7 @@ app.whenReady().then(async () => {
       type: 'error',
       title: 'Backend Failed to Start',
       message: 'The NLM backend server could not be started.',
-      detail: 'Check that Python and the virtual environment are correctly installed in nlm_backend_venv.',
+      detail: 'Check that the Python virtual environment exists at .venv in the repo root. Run `npm run setup` (or `uv sync` at the repo root) to create it.',
       buttons: ['Quit'],
       defaultId: 0,
     });

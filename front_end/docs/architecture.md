@@ -77,7 +77,7 @@ mainWindow = new BrowserWindow({
 
 ### backend-manager.ts
 
-Starts/stops the FastAPI backend subprocess (Python, via the `nlm_backend_venv` virtualenv) and polls `/api/check-connection` until it responds before considering it ready. Only manages the process lifecycle — see Data Flow above for how the renderer actually talks to it.
+Starts/stops the FastAPI backend subprocess (Python, via the repo-root `<repo>/.venv` virtualenv, or `UV_PROJECT_ENVIRONMENT` if set) and polls `/api/check-connection` until it responds before considering it ready. Only manages the process lifecycle — see Data Flow above for how the renderer actually talks to it.
 
 ### mongod-manager.ts
 

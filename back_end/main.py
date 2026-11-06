@@ -33,10 +33,9 @@ MIGRATION_MESSAGE = (
     "MongoDB now requires authentication, but ~/.nlm/mongodb_credentials.env has no\n"
     "password. Your data is intact — this only affects access. To create a credential:\n"
     "\n"
-    "  cd back_end && source nlm_backend_venv/bin/activate\n"
-    "  python -m db_connector.setup_auth\n"
+    "  cd back_end && uv run python -m db_connector.setup_auth\n"
     "\n"
-    "(Windows: nlm_backend_venv\\Scripts\\activate)"
+    "(or activate the repo-root .venv and run: python -m db_connector.setup_auth)"
 )
 
 

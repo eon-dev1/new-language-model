@@ -4,13 +4,13 @@ MCP (Model Context Protocol) server exposing MongoDB collections to Claude Code/
 
 ## Setup
 
-`mcp` is included in `back_end/requirements.txt`. See the [repo root README](../../../README.md) for full setup instructions.
+`mcp` is a pinned dependency in the repo-root `pyproject.toml`; `uv sync` installs it. uv must be on `PATH` for the committed `.mcp.json`. See the [repo root README](../../README.md) for full setup instructions.
 
 ## Running the Server
 
 ```bash
 # From back_end directory
-python -m mcp_server.server
+uv run -m mcp_server.server
 ```
 
 ## Claude Code Configuration
@@ -21,8 +21,8 @@ Add to your project-level `.mcp.json` or `~/.claude.json`:
 {
   "mcpServers": {
     "nlm-database": {
-      "command": "python",
-      "args": ["-m", "mcp_server.server"],
+      "command": "uv",
+      "args": ["run", "-m", "mcp_server.server"],
       "cwd": "/path/to/back_end"
     }
   }

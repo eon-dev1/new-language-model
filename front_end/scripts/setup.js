@@ -1,5 +1,5 @@
 // setup.js
-// One-command fresh-machine setup: npm install, Python venv, pip install,
+// One-command fresh-machine setup: npm install, Python environment (uv sync),
 // MongoDB binaries, and the MongoDB credential.
 // Run via: npm run setup (from front_end/)
 
@@ -12,32 +12,12 @@ const { execFileSync } = require('child_process');
 
 const scriptDir = __dirname;
 const frontEndDir = path.join(scriptDir, '..');
-const backEndDir = path.join(scriptDir, '..', '..', 'back_end');
+const repoRoot = path.join(scriptDir, '..', '..');
+const backEndDir = path.join(repoRoot, 'back_end');
 
-function detectPython() {
-  const candidates = process.platform === 'win32'
-    ? [['python', []], ['py', ['-3']], ['python3', []]]
-    : [['python3', []], ['python', []]];
-
-  for (const [cmd, prefix] of candidates) {
-    try {
-      const out = execFileSync(cmd, [...prefix, '--version'], {
-        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 3000,
-      });
-      const m = /Python (\d+)\.(\d+)/.exec(out);
-      if (m && (+m[1] > 3 || (+m[1] === 3 && +m[2] >= 10))) {
-        return { cmd, prefix, version: `${m[1]}.${m[2]}` };
-      }
-    } catch { /* try next candidate */ }
-  }
-  return null;
-}
-
-function venvPythonPath() {
-  return process.platform === 'win32'
-    ? path.join(backEndDir, 'nlm_backend_venv', 'Scripts', 'python.exe')
-    : path.join(backEndDir, 'nlm_backend_venv', 'bin', 'python');
-}
+// Official uv on Windows is uv.exe. execFileSync without a shell does not apply
+// PATHEXT, so the extension must be spelled out; a shell would only add a quoting surface.
+const uvCmd = process.platform === 'win32' ? 'uv.exe' : 'uv';
 
 function stage0Preflight() {
   console.log('Stage 0: Preflight');
@@ -57,14 +37,19 @@ function stage0Preflight() {
     throw new Error(`Node 18+ required (found ${process.versions.node}).`);
   }
 
-  const python = detectPython();
-  if (!python) {
-    throw new Error("Python 3.10+ required. Install from python.org — on Windows check 'Add python.exe to PATH'.");
+  // uv downloads the Python version pinned in .python-version itself, so no system
+  // Python is needed — only uv.
+  let uvVersion;
+  try {
+    uvVersion = execFileSync(uvCmd, ['--version'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000,
+    }).trim();
+  } catch {
+    throw new Error('uv is required and was not found on PATH. Install it from https://docs.astral.sh/uv/ and re-run.');
   }
-  console.log(`  Python ${python.version} detected (${python.cmd}).`);
+  console.log(`  ${uvVersion} detected.`);
 
-  console.log('  Plan: npm install -> Python venv -> pip install -> MongoDB binaries -> MongoDB credential -> git hooks.');
-  return python;
+  console.log('  Plan: npm install -> uv sync -> MongoDB binaries -> MongoDB credential -> git hooks.');
 }
 
 function stage1NpmInstall() {
@@ -80,51 +65,30 @@ function stage1NpmInstall() {
   });
 }
 
-function stage2Venv(python) {
-  console.log('Stage 2: Python venv');
-  const venvDir = path.join(backEndDir, 'nlm_backend_venv');
-  const venvPython = venvPythonPath();
-
-  if (fs.existsSync(venvPython)) {
-    console.log('  nlm_backend_venv/ already exists — skipping.');
-    return;
-  }
-  if (fs.existsSync(venvDir)) {
-    throw new Error(
-      `nlm_backend_venv/ exists but is incomplete (no ${path.relative(backEndDir, venvPython)}). ` +
-      'Delete the directory and re-run setup.'
-    );
-  }
-
-  execFileSync(python.cmd, [...python.prefix, '-m', 'venv', 'nlm_backend_venv'], {
-    cwd: backEndDir, stdio: 'inherit',
-  });
+function stage2UvSync() {
+  console.log('Stage 2: uv sync');
+  // Runs every time, not only on first setup: a skip-if-present check would leave the
+  // environment behind uv.lock after a pull. A warm uv cache makes a no-op sync fast.
+  // uv honours UV_PROJECT_ENVIRONMENT, so the devcontainer's venv path needs no branch here.
+  execFileSync(uvCmd, ['sync'], { cwd: repoRoot, stdio: 'inherit' });
 }
 
-function stage3PipInstall() {
-  console.log('Stage 3: pip install');
-  execFileSync(venvPythonPath(), ['-m', 'pip', 'install', '-r', 'requirements.txt'], {
-    cwd: backEndDir, stdio: 'inherit',
-  });
-}
-
-function stage4MongoBinaries() {
-  console.log('Stage 4: MongoDB binaries');
+function stage3MongoBinaries() {
+  console.log('Stage 3: MongoDB binaries');
   execFileSync(process.execPath, [path.join(scriptDir, 'download-mongo-binaries.js')], {
     cwd: frontEndDir, stdio: 'inherit',
   });
 }
 
-function stage5MongoCredential() {
-  console.log('Stage 5: MongoDB credential');
-  execFileSync(venvPythonPath(), ['-m', 'db_connector.setup_auth'], {
-    cwd: backEndDir, stdio: 'inherit',
+function stage4MongoCredential() {
+  console.log('Stage 4: MongoDB credential');
+  execFileSync(uvCmd, ['run', '--directory', backEndDir, 'python', '-m', 'db_connector.setup_auth'], {
+    stdio: 'inherit',
   });
 }
 
-function stage6GitHooks() {
-  console.log('Stage 6: Git hooks');
-  const repoRoot = path.join(scriptDir, '..', '..');
+function stage5GitHooks() {
+  console.log('Stage 5: Git hooks');
   // Relative hooksPath is resolved by git against the working-tree root, and is
   // committed, so every clone shares .githooks/ once this runs. Idempotent.
   // Best-effort: a ZIP/tarball download is not a git repo, so `git config` would
@@ -152,7 +116,7 @@ function stage6GitHooks() {
   }
 }
 
-function stage7Checklist() {
+function stage6Checklist() {
   console.log(`
 Setup complete.
 
@@ -165,14 +129,13 @@ Then: cd front_end && npm run dev
 }
 
 function main() {
-  const python = stage0Preflight();
+  stage0Preflight();
   stage1NpmInstall();
-  stage2Venv(python);
-  stage3PipInstall();
-  stage4MongoBinaries();
-  stage5MongoCredential();
-  stage6GitHooks();
-  stage7Checklist();
+  stage2UvSync();
+  stage3MongoBinaries();
+  stage4MongoCredential();
+  stage5GitHooks();
+  stage6Checklist();
 }
 
 if (require.main === module) {
@@ -184,4 +147,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { detectPython, venvPythonPath, main };
+module.exports = { main };

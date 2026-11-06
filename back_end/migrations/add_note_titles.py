@@ -16,9 +16,8 @@ language_notes document and is concurrency-unsafe vs. concurrent POST/DELETE.
 
 Run:
     cd back_end
-    source nlm_backend_venv/bin/activate
-    python -m migrations.add_note_titles            # dry-run
-    python -m migrations.add_note_titles --apply    # write + self-verify
+    uv run python -m migrations.add_note_titles            # dry-run
+    uv run python -m migrations.add_note_titles --apply    # write + self-verify
 """
 
 import argparse
