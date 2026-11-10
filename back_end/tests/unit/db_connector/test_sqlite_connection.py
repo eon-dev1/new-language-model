@@ -13,6 +13,8 @@ original cross-thread bug.
 """
 
 import asyncio
+import functools
+import logging
 import os
 import sqlite3
 import stat
@@ -24,7 +26,6 @@ from db_connector.sqlite_connection import (
     run_db,
     _run,
     _default_db_path,
-    BUSY_TIMEOUT_MS,
 )
 
 
@@ -65,9 +66,49 @@ class TestPragmas:
         enabled = await run_db(lambda c: c.execute("PRAGMA foreign_keys").fetchone()[0])
         assert enabled == 1
 
-    async def test_busy_timeout_configured(self):
-        timeout = await run_db(lambda c: c.execute("PRAGMA busy_timeout").fetchone()[0])
-        assert timeout == BUSY_TIMEOUT_MS
+    async def test_busy_timeout_follows_constant(self, tmp_path, monkeypatch):
+        # 1500 differs from connect()'s default (5000), so this fails if the
+        # timeout argument is dropped or hardcoded.
+        monkeypatch.setattr("db_connector.sqlite_connection.BUSY_TIMEOUT_MS", 1500)
+        timeout = await run_db(
+            lambda c: c.execute("PRAGMA busy_timeout").fetchone()[0],
+            db_path=tmp_path / "t.sqlite3",
+        )
+        assert timeout == 1500
+
+    async def test_no_wal_warning_when_wal_enabled(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="db_connector.sqlite_connection"):
+            await run_db(lambda c: None)
+        assert [r for r in caplog.records if r.name == "db_connector.sqlite_connection"] == []
+
+
+class _WalRefusingConnection(sqlite3.Connection):
+    """Answers 'delete' to 'PRAGMA journal_mode = WAL', as a filesystem that
+    cannot do WAL would. The real connection stays in rollback-journal mode."""
+
+    def execute(self, sql, *args):
+        if sql.startswith("PRAGMA journal_mode"):
+            sql = "SELECT 'delete'"
+        return super().execute(sql, *args)
+
+
+class TestWalUnavailable:
+    async def test_warns_and_keeps_working(self, tmp_path, monkeypatch, caplog):
+        monkeypatch.setattr(
+            sqlite3, "connect", functools.partial(sqlite3.connect, factory=_WalRefusingConnection)
+        )
+        db = tmp_path / "t.sqlite3"
+
+        def _write(c):
+            c.execute("CREATE TABLE t (x)")
+            c.execute("INSERT INTO t VALUES (1)")
+
+        with caplog.at_level(logging.WARNING, logger="db_connector.sqlite_connection"):
+            await run_db(_write, db_path=db, write=True)
+            value = await run_db(lambda c: c.execute("SELECT x FROM t").fetchone()[0], db_path=db)
+        assert value == 1
+        warnings = [r for r in caplog.records if r.name == "db_connector.sqlite_connection"]
+        assert len(warnings) == 1  # two calls, one warning
 
 
 class TestConnectionLifecycle:
@@ -252,37 +293,50 @@ class TestExceptionSafety:
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits only")
 class TestPosixPermissions:
-    """Credential-file-style permissions: 0o700 dir, 0o600 db file (and sidecars)."""
+    """Credential-file-style permissions: 0o700 dirs, 0o600 db file and sidecars
+    (sidecars take the db file's mode)."""
+
+    @pytest.fixture
+    def permissive_umask(self):
+        # With umask 077 a new file is 0o600 without any chmod, so permission tests
+        # could not fail. 022 is the common default and makes a missing chmod visible.
+        old_umask = os.umask(0o022)
+        yield
+        os.umask(old_umask)
 
     async def test_directory_permissions(self, _fake_home):
+        # ~/.nlm already exists at 0o755, the state a user has today.
+        nlm_dir = _fake_home / ".nlm"
+        nlm_dir.mkdir()
+        nlm_dir.chmod(0o755)
         await run_db(lambda c: None)
-        db_dir = _fake_home / ".nlm" / "data"
-        assert stat.S_IMODE(db_dir.stat().st_mode) == 0o700
+        assert stat.S_IMODE(nlm_dir.stat().st_mode) == 0o700
+        assert stat.S_IMODE((nlm_dir / "data").stat().st_mode) == 0o700
 
-    async def test_db_file_permissions(self, _fake_home):
+    async def test_explicit_db_path_leaves_parent_alone(self, tmp_path):
+        """With an explicit db_path the parent directory belongs to the caller."""
+        custom = tmp_path / "custom"
+        custom.mkdir()
+        custom.chmod(0o755)  # defeats the umask, so the starting mode is known
+        await run_db(lambda c: None, db_path=custom / "t.sqlite3")
+        assert stat.S_IMODE(custom.stat().st_mode) == 0o755
+
+    async def test_db_file_permissions(self, _fake_home, permissive_umask):
         await run_db(lambda c: None)
         db_file = _fake_home / ".nlm" / "data" / "nlm.sqlite3"
         assert stat.S_IMODE(db_file.stat().st_mode) == 0o600
 
-    async def test_wal_sidecars_chmodded(self, _fake_home):
+    async def test_wal_sidecars_are_private(self, _fake_home, permissive_umask):
+        """Sidecars take the main file's mode, which _run sets to 0o600 before
+        the first transaction; no sidecar chmod exists."""
         db_file = _fake_home / ".nlm" / "data" / "nlm.sqlite3"
-        wal = db_file.with_name(db_file.name + "-wal")
-        shm = db_file.with_name(db_file.name + "-shm")
 
-        # Establish the DB + WAL mode.
-        await run_db(lambda c: c.execute("CREATE TABLE t (x)").close(), write=True)
+        def _modes_inside_fn(c):
+            # Inside the transaction both sidecars already exist.
+            return {
+                suffix: stat.S_IMODE(db_file.with_name(db_file.name + suffix).stat().st_mode)
+                for suffix in ("-wal", "-shm")
+            }
 
-        # -wal/-shm are deleted when the LAST connection closes, so hold a
-        # keep-alive connection open on this thread. That keeps them alive past
-        # the next run_db's close, letting us observe the chmod result — which is
-        # also the only real-world state the sidecar chmod matters in (concurrent
-        # overlapping connections).
-        keep = sqlite3.connect(db_file)
-        try:
-            keep.execute("SELECT COUNT(*) FROM t").fetchone()  # establishes -shm
-            await run_db(lambda c: c.execute("INSERT INTO t VALUES (1)").close(), write=True)
-            assert wal.exists() and shm.exists()
-            assert stat.S_IMODE(wal.stat().st_mode) == 0o600
-            assert stat.S_IMODE(shm.stat().st_mode) == 0o600
-        finally:
-            keep.close()
+        modes = await run_db(_modes_inside_fn, write=True)
+        assert modes == {"-wal": 0o600, "-shm": 0o600}

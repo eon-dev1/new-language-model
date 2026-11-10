@@ -15,6 +15,8 @@ a callback.
 """
 
 import asyncio
+import functools
+import logging
 import os
 import sqlite3
 from pathlib import Path
@@ -22,11 +24,26 @@ from typing import Callable, TypeVar
 
 T = TypeVar("T")
 
+logger = logging.getLogger(__name__)
+
 BUSY_TIMEOUT_MS = 5000
 
 
 def _default_db_path() -> Path:
     return Path.home() / ".nlm" / "data" / "nlm.sqlite3"
+
+
+@functools.cache
+def _warn_wal_unavailable(db_path: Path, mode: str) -> None:
+    # cache dedupes this per (path, mode); run_db opens a connection per call
+    # and would otherwise repeat the warning on every request.
+    logger.warning(
+        "SQLite could not enable WAL mode on %s (journal_mode is %r). Continuing "
+        "in that mode: it is correct but readers can block behind writers. WAL "
+        "needs a local filesystem; a network share is the usual cause.",
+        db_path,
+        mode,
+    )
 
 
 def _run(db_path: Path, fn: Callable[[sqlite3.Connection], T], write: bool = False) -> T:
@@ -39,25 +56,36 @@ def _run(db_path: Path, fn: Callable[[sqlite3.Connection], T], write: bool = Fal
     """
     db_dir = db_path.parent
     db_dir.mkdir(parents=True, exist_ok=True)
-    if os.name == "posix":
-        db_dir.chmod(0o700)
+    # Only the default location is ours to lock down. With an explicit db_path
+    # the parent belongs to the caller and its permissions are left alone.
+    if os.name == "posix" and db_path == _default_db_path():
+        for private_dir in (db_dir.parent, db_dir):  # ~/.nlm, then ~/.nlm/data
+            private_dir.chmod(0o700)
 
     # isolation_level=None: sqlite3 issues no implicit BEGIN/COMMIT; _run owns
     # both. (The legacy default opens a transaction before DML but not before
     # SELECT, which would leave check-then-write logic non-atomic.)
-    conn = sqlite3.connect(db_path, isolation_level=None)
+    conn = sqlite3.connect(
+        db_path,
+        isolation_level=None,
+        # Wait up to this long on SQLITE_BUSY (ordinary lock contention). Does not
+        # cover SQLITE_BUSY_SNAPSHOT, which write=True avoids via BEGIN IMMEDIATE.
+        timeout=BUSY_TIMEOUT_MS / 1000,
+    )
     try:
-        # All three reissued every call: foreign_keys is connection-scoped and
-        # resets on every new connection; journal_mode=WAL is file-scoped so
-        # reissuing it past the first connection is a harmless no-op;
-        # busy_timeout absorbs ordinary SQLITE_BUSY contention from concurrent
-        # connections. All must precede BEGIN: foreign_keys is a no-op inside a
-        # transaction and journal_mode can't change inside one.
-        conn.execute("PRAGMA journal_mode = WAL")
+        # Both reissued every call: foreign_keys is connection-scoped and resets on
+        # every new connection; journal_mode=WAL is file-scoped, so reissuing it
+        # past the first connection is a harmless no-op. Both must precede BEGIN:
+        # foreign_keys is a no-op inside a transaction and journal_mode can't
+        # change inside one.
+        journal_mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+        if journal_mode != "wal":
+            _warn_wal_unavailable(db_path, journal_mode)
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
 
         if os.name == "posix":
+            # Before the first transaction: SQLite creates the -wal/-shm sidecars
+            # with the main file's mode, so this also makes them 0o600.
             db_path.chmod(0o600)
 
         if write:
@@ -81,19 +109,6 @@ def _run(db_path: Path, fn: Callable[[sqlite3.Connection], T], write: bool = Fal
             # as long as that traceback lives. No-op after COMMIT.
             conn.rollback()
         finally:
-            if os.name == "posix":
-                # WAL's -wal/-shm sidecars are created lazily on first write (not
-                # at PRAGMA time) and inherit the process umask, so this is the
-                # point in the lifecycle where they may exist and need locking
-                # down. They are removed again when the last connection closes,
-                # so this chmod only persists while another connection keeps the
-                # file open — the concurrent case it exists to cover.
-                # Confidentiality is held by the 0o700 directory regardless.
-                # Chmod before close(), which may delete them.
-                for suffix in ("-wal", "-shm"):
-                    sidecar = db_path.with_name(db_path.name + suffix)
-                    if sidecar.exists():
-                        sidecar.chmod(0o600)
             conn.close()
 
 

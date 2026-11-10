@@ -51,7 +51,7 @@ DDL_STATEMENTS: list[str] = [
         translated_text_lc TEXT,
         UNIQUE (language_code, book_code, chapter, verse)
     )""",
-    "CREATE INDEX IF NOT EXISTS idx_bible_texts_language_code ON bible_texts(language_code)",
+    # No language_code index: the UNIQUE constraint's index already leads with it.
     "CREATE INDEX IF NOT EXISTS idx_bible_texts_book_code ON bible_texts(book_code)",
 
     """CREATE TABLE IF NOT EXISTS bible_books (
@@ -65,7 +65,7 @@ DDL_STATEMENTS: list[str] = [
             GENERATED ALWAYS AS (json_extract(data, '$.metadata.canonical_order')) STORED,
         UNIQUE (language_code, book_code)
     )""",
-    "CREATE INDEX IF NOT EXISTS idx_bible_books_language_code ON bible_books(language_code)",
+    # No separate language_code index: the UNIQUE constraint's index already leads with it.
 
     """CREATE TABLE IF NOT EXISTS base_structure_bible (
         id TEXT PRIMARY KEY NOT NULL,
