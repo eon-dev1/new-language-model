@@ -103,6 +103,10 @@ DDL_STATEMENTS: list[str] = [
     # examples is always a JSON array. Legacy rows stored this as a list, a
     # bare string, or omitted it; writers and migration normalize those to
     # [] so a DEFAULT of '[]' matches the empty case.
+    # word must already be in normalize_word() form (shared/storage_conventions.py)
+    # when written, and non-empty: the primary key compares bytes, so "Tok" and
+    # "tok" would otherwise be two rows. SQL cannot check this, because SQLite's
+    # lower() is ASCII-only and it has no Unicode normalization.
     """CREATE TABLE IF NOT EXISTS entries (
         dictionary_id TEXT NOT NULL REFERENCES dictionaries(id) ON DELETE CASCADE,
         word TEXT NOT NULL,

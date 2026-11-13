@@ -9,6 +9,8 @@ stops (phonemic in Oceanic languages like Bughotu and Kope).
 import re
 import unicodedata
 
+from shared.storage_conventions import normalize_word
+
 
 # Characters that act as word separators (split on these in addition to whitespace)
 _WORD_SEPARATORS = re.compile(r"[\s\u2014\u2013/]+")  # whitespace, em-dash, en-dash, slash
@@ -63,8 +65,9 @@ def tokenize_verse(text: str) -> list[str]:
         if stripped:
             word = stripped
 
-        # Lowercase
-        word = word.lower()
+        # Lowercase (and re-NFC) with the same function that produces stored
+        # dictionary words, so in_dictionary matching is exact string equality.
+        word = normalize_word(word)
 
         # Skip empty tokens and pure-punctuation remnants
         if not word:
